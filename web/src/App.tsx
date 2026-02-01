@@ -3,7 +3,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -18,6 +17,7 @@ import {
   Backpack,
   BarChart3,
   Heart,
+  Activity,
   ListOrdered,
   Sparkles,
   Swords,
@@ -132,35 +132,28 @@ function useToolOutput(): ToolOutput {
 
 function Section({
   title,
-  subtitle,
   icon,
   children,
 }: {
   title: string;
-  subtitle?: string;
   icon?: ReactNode;
   children: ReactNode;
 }) {
   const headerContent = (
     <>
-      <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
+      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
         {icon}
       </div>
       <div className="min-w-0">
         <CardTitle className="text-base leading-tight">{title}</CardTitle>
-        {subtitle ? (
-          <CardDescription className="mt-1 line-clamp-2">
-            {subtitle}
-          </CardDescription>
-        ) : null}
       </div>
     </>
   );
   return (
     <Card className="rounded-2xl shadow-sm">
       <CardHeader className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-start gap-3 transition-colors hover:text-foreground">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-foreground">
             {headerContent}
           </div>
         </div>
@@ -172,13 +165,11 @@ function Section({
 
 function AccordionSection({
   title,
-  subtitle,
   icon,
   defaultOpen = true,
   children,
 }: {
   title: string;
-  subtitle?: string;
   icon?: ReactNode;
   defaultOpen?: boolean;
   children: ReactNode;
@@ -194,20 +185,15 @@ function AccordionSection({
         <AccordionItem value="section" className="border-none">
           <CardHeader className="space-y-2">
             <AccordionTrigger className="py-0 hover:no-underline cursor-pointer">
-              <div className="flex w-full items-start justify-between gap-3 text-left">
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
+              <div className="flex w-full items-center justify-between gap-3 text-left">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
                     {icon}
                   </div>
                   <div className="min-w-0">
                     <CardTitle className="text-base leading-tight">
                       {title}
                     </CardTitle>
-                    {subtitle ? (
-                      <CardDescription className="mt-1 line-clamp-2">
-                        {subtitle}
-                      </CardDescription>
-                    ) : null}
                   </div>
                 </div>
               </div>
@@ -377,7 +363,7 @@ export function App() {
           </CardContent>
         </Card>
 
-        <Section title="Resources" subtitle="HP / MP" icon={<Heart className="h-4 w-4" />}>
+        <Section title="Resources" icon={<Activity className="h-4 w-4" />}>
           <div className="space-y-4">
             <Meter
               label="HP"
@@ -400,7 +386,6 @@ export function App() {
 
         <AccordionSection
           title="Stats"
-          subtitle="Full scores"
           icon={<BarChart3 className="h-4 w-4" />}
           defaultOpen
         >
@@ -419,7 +404,6 @@ export function App() {
 
         <AccordionSection
           title="Inventory"
-          subtitle={inventory.length ? "Flat list" : "No items yet"}
           icon={<Backpack className="h-4 w-4" />}
           defaultOpen={false}
         >
@@ -453,7 +437,6 @@ export function App() {
           <div className="space-y-3">
             <AccordionSection
               title="Initiative"
-              subtitle="Turn order"
               icon={<ListOrdered className="h-4 w-4" />}
               defaultOpen
             >
@@ -466,7 +449,6 @@ export function App() {
 
             <AccordionSection
               title="Combat tracker"
-              subtitle="Qualitative damage"
               icon={<Swords className="h-4 w-4" />}
               defaultOpen
             >
