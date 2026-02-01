@@ -1,0 +1,26 @@
+# Node
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+web/dist/
+
+# Env files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# MCP inspector
+.mcp-inspector/

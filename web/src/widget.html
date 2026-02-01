@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mythweaver TTRPG</title>
+    <style>
+/*__TAILWIND__*/
+    </style>
+  </head>
+  <body class="min-h-screen">
+    <div id="app" class="min-h-screen px-4 py-6"></div>
+
+    <script type="module">
+      const app = document.getElementById("app");
+
+      let toolOutput = window.openai?.toolOutput ?? null;
+      let widgetState = window.openai?.widgetState ?? { activeTab: "status" };
+
+      const tabs = [
+        { id: "status", label: "Status" },
+        { id: "inventory", label: "Inventory" },
+        { id: "combat", label: "Combat" },
+        { id: "log", label: "Log" },
+      ];
+
+      const safeText = (value, fallback = "") =>
+        typeof value === "string" ? value : fallback;
+
+      const getGameState = () => {
+        const output = toolOutput;
+        if (output && output.type === "ttrpg_state") {
+          return output;
+        }
+        return null;
+      };
+
+      const setWidgetState = (next) => {
+        widgetState = { ...widgetState, ...next };
+        if (window.openai?.setWidgetState) {
+          window.openai.setWidgetState(widgetState);
+        }
+      };
+
+      const updateFromGlobals = (globals) => {
+        if (globals?.toolOutput) {
+          toolOutput = globals.toolOutput;
+          const game = getGameState();
+          if (game?.gameId) {
+            setWidgetState({ gameId: game.gameId });
+          }
+          render();
+        }
+      };
+
+      const updateFromResponse = (response) => {
+        if (response?.structuredContent) {
+          toolOutput = response.structuredContent;
+          const game = getGameState();
+          if (game?.gameId) {
+            setWidgetState({ gameId: game.gameId });
+          }
+          render();
+        }
+      };
+
+      window.addEventListener(
+        "openai:set_globals",
+        (event) => updateFromGlobals(event.detail?.globals),
+        { passive: true }
+      );
+
+      const callTool = async (name, payload) => {
+        if (!window.openai?.callTool) {
+          alert("Tool calls are unavailable in this environment.");
+          return null;
+        }
+        const response = await window.openai.callTool(name, payload);
+        updateFromResponse(response);
+        return response;
+      };
+
+      const sendFollowUp = async (prompt) => {
+        if (!window.openai?.sendFollowUpMessage) return;
+        await window.openai.sendFollowUpMessage({ prompt });
+      };
+
+      const percent = (value, max) =>
+        max > 0 ? Math.round((value / max) * 100) : 0;
+
+      const pill = (label, tone) => {
+        const styles = {
+          setup: "bg-[color:var(--ember)]/20 text-[color:var(--ember)]",
+          exploration: "bg-[color:var(--accent)]/20 text-[color:var(--accent)]",
+          combat: "bg-[color:var(--danger)]/20 text-[color:var(--danger)]",
+        };
+        const cls = styles[tone] ?? styles.exploration;
+        return `<span class=\"inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${cls}\">${label}</span>`;
+      };
+
+      const renderSetup = (game) => {
+        const storyElements = (game?.storyElements ?? []).join(", ");
+        return `
+          <section class="rounded-3xl bg-[color:var(--panel)]/90 p-6 shadow-glow">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm uppercase tracking-[0.3em] text-[color:var(--muted)]">Setup</p>
+                <h2 class="text-2xl font-semibold">Shape the adventure</h2>
+              </div>
+              <span class="rounded-full border border-white/10 px-3 py-1 text-xs text-[color:var(--muted)]">Required</span>
+            </div>
+            <form id="setup-form" class="mt-6 grid gap-4 md:grid-cols-2">
+              <label class="grid gap-2 text-sm">
+                <span>Genre</span>
+                <input name="genre" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Noir fantasy, solarpunk, etc." value="${safeText(game?.genre)}" required />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Tone</span>
+                <input name="tone" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Hopeful, gritty, surreal" value="${safeText(game?.tone)}" />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Player name</span>
+                <input name="pcName" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Aster Vale" value="${safeText(game?.pc?.name)}" required />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Pronouns</span>
+                <input name="pcPronouns" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="they/them" value="${safeText(game?.pc?.pronouns)}" />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Archetype</span>
+                <input name="pcArchetype" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Sky pirate, relic hunter" value="${safeText(game?.pc?.archetype)}" required />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Background</span>
+                <input name="pcBackground" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Former guild envoy" value="${safeText(game?.pc?.background)}" />
+              </label>
+              <label class="grid gap-2 text-sm md:col-span-2">
+                <span>Story elements</span>
+                <input name="storyElements" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Cursed lighthouse, rival crew, hidden map" value="${safeText(storyElements)}" />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Starting location</span>
+                <input name="startingLocation" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm" placeholder="Azure Docks" value="${safeText(game?.location)}" />
+              </label>
+              <label class="grid gap-2 text-sm">
+                <span>Stat focus</span>
+                <select name="statFocus" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
+                  <option value="">Balanced</option>
+                  <option value="str">Strength</option>
+                  <option value="agi">Agility</option>
+                  <option value="int">Intellect</option>
+                  <option value="cha">Charm</option>
+                </select>
+              </label>
+              <div class="md:col-span-2 flex flex-wrap items-center gap-3 pt-2">
+                <button class="rounded-full bg-[color:var(--accent)] px-6 py-3 text-sm font-semibold text-black">Start game</button>
+                <span class="text-xs text-[color:var(--muted)]">We will use a d20 for checks and track HP/MP.</span>
+              </div>
+            </form>
+          </section>
+        `;
+      };
+
+      const renderStatBlock = (label, current, max, tone) => {
+        const barTone = tone === "mp" ? "bg-[color:var(--accent)]" : "bg-[color:var(--danger)]";
+        return `
+          <div class="rounded-2xl bg-[color:var(--panel)]/90 p-4">
+            <div class="flex items-center justify-between text-sm text-[color:var(--muted)]">
+              <span>${label}</span>
+              <span>${current} / ${max}</span>
+            </div>
+            <div class="mt-3 h-2 rounded-full bg-white/10">
+              <div class="h-2 rounded-full ${barTone}" style="width: ${percent(current, max)}%"></div>
+            </div>
+          </div>
+        `;
+      };
+
+      const renderTabs = (active) => {
+        return `
+          <div class="flex flex-wrap gap-2">
+            ${tabs
+              .map((tab) => {
+                const isActive = active === tab.id;
+                return `
+                  <button data-tab="${tab.id}" class="rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${
+                    isActive
+                      ? "bg-[color:var(--accent)] text-black"
+                      : "bg-white/5 text-[color:var(--muted)]"
+                  }">
+                    ${tab.label}
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      };
+
+      const renderInventory = (game) => {
+        if (!game.inventory?.length) {
+          return `<p class="text-sm text-[color:var(--muted)]">No inventory items yet.</p>`;
+        }
+
+        return `
+          <ul class="space-y-3">
+            ${game.inventory
+              .map(
+                (item) => `
+                  <li class="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
+                    <div>
+                      <p class="text-sm font-semibold">${item.name}</p>
+                      <p class="text-xs text-[color:var(--muted)]">Qty ${item.qty} ${
+                        item.notes ? `• ${item.notes}` : ""
+                      }</p>
+                    </div>
+                    <button data-remove-item="${item.id}" class="rounded-full border border-white/10 px-3 py-1 text-xs text-[color:var(--muted)] hover:text-white">Remove</button>
+                  </li>
+                `
+              )
+              .join("")}
+          </ul>
+        `;
+      };
+
+      const renderCombat = (game) => {
+        if (!game.combat) {
+          return `<p class="text-sm text-[color:var(--muted)]">No active combat.</p>`;
+        }
+        return `
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm uppercase tracking-[0.2em] text-[color:var(--muted)]">Enemy</p>
+                <h3 class="text-lg font-semibold">${game.combat.enemyName}</h3>
+                <p class="text-xs text-[color:var(--muted)]">${safeText(game.combat.enemyIntent)}</p>
+              </div>
+              <button data-end-combat class="rounded-full border border-white/10 px-3 py-1 text-xs text-[color:var(--muted)] hover:text-white">End</button>
+            </div>
+            <div class="rounded-2xl bg-white/5 p-4">
+              <div class="flex items-center justify-between text-xs text-[color:var(--muted)]">
+                <span>Enemy HP</span>
+                <span>${game.combat.enemyHp} / ${game.combat.enemyHpMax}</span>
+              </div>
+              <div class="mt-2 h-2 rounded-full bg-white/10">
+                <div class="h-2 rounded-full bg-[color:var(--ember)]" style="width: ${percent(
+                  game.combat.enemyHp,
+                  game.combat.enemyHpMax
+                )}%"></div>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+
+      const renderLog = (game) => {
+        if (!game.log?.length) {
+          return `<p class="text-sm text-[color:var(--muted)]">Story log is empty.</p>`;
+        }
+        return `
+          <ol class="space-y-3">
+            ${game.log
+              .slice()
+              .reverse()
+              .map(
+                (entry) => `
+                  <li class="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">${entry.kind}</p>
+                    <p class="text-sm">${entry.text}</p>
+                    <p class="mt-2 text-[10px] text-[color:var(--muted)]">${new Date(
+                      entry.at
+                    ).toLocaleString()}</p>
+                  </li>
+                `
+              )
+              .join("")}
+          </ol>
+        `;
+      };
+
+      const renderActions = (game) => {
+        const lastRoll = game.lastRoll
+          ? `<div class="rounded-2xl bg-white/5 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Last roll</p>
+              <p class="mt-1 text-sm font-semibold">${game.lastRoll.formula} = ${
+              game.lastRoll.total
+            }</p>
+              <p class="text-xs text-[color:var(--muted)]">${game.lastRoll.reason ?? ""}</p>
+            </div>`
+          : `<p class="text-sm text-[color:var(--muted)]">No rolls yet.</p>`;
+
+        return `
+          <div class="space-y-4">
+            <form id="roll-form" class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Dice roll</p>
+              <div class="mt-3 grid gap-2">
+                <input name="formula" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="d20 or 2d6+1" required />
+                <input name="reason" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Reason" />
+              </div>
+              <button class="mt-3 rounded-full bg-[color:var(--accent)] px-4 py-2 text-xs font-semibold text-black">Roll</button>
+            </form>
+            ${lastRoll}
+            <form id="resource-form" class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Adjust HP / MP</p>
+              <div class="mt-3 grid grid-cols-2 gap-2">
+                <input name="hpDelta" type="number" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="HP delta" />
+                <input name="mpDelta" type="number" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="MP delta" />
+              </div>
+              <button class="mt-3 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-[color:var(--muted)] hover:text-white">Apply</button>
+            </form>
+            <form id="item-form" class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Add inventory</p>
+              <div class="mt-3 grid gap-2">
+                <input name="itemName" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Item name" required />
+                <div class="grid grid-cols-2 gap-2">
+                  <input name="itemQty" type="number" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Qty" />
+                  <input name="itemNotes" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Notes" />
+                </div>
+              </div>
+              <button class="mt-3 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-[color:var(--muted)] hover:text-white">Add item</button>
+            </form>
+            <form id="combat-form" class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Start combat</p>
+              <div class="mt-3 grid gap-2">
+                <input name="enemyName" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Enemy name" />
+                <div class="grid grid-cols-2 gap-2">
+                  <input name="enemyHp" type="number" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Enemy HP" />
+                  <input name="enemyIntent" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" placeholder="Intent" />
+                </div>
+              </div>
+              <button class="mt-3 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-[color:var(--muted)] hover:text-white">Engage</button>
+            </form>
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Narration</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button id="continue-story" class="rounded-full bg-[color:var(--ember)] px-4 py-2 text-xs font-semibold text-black">Continue story</button>
+                <button id="summon-gm" class="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-[color:var(--muted)] hover:text-white">Ask for guidance</button>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+
+      const renderMain = (game) => {
+        const activeTab = widgetState.activeTab ?? "status";
+        return `
+          <section class="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+            <div class="space-y-6">
+              <div class="rounded-3xl bg-[color:var(--panel)]/90 p-6 shadow-glow">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted)]">Adventure</p>
+                    <h2 class="text-2xl font-semibold">${safeText(
+                      game.pc?.name || "Unnamed hero"
+                    )}</h2>
+                    <p class="text-sm text-[color:var(--muted)]">${
+                      safeText(game.genre) || "Genre TBD"
+                    } ${game.tone ? `• ${game.tone}` : ""}</p>
+                  </div>
+                  ${pill(game.phase, game.phase)}
+                </div>
+                <div class="mt-6 grid gap-3 md:grid-cols-2">
+                  ${renderStatBlock("HP", game.hp.current, game.hp.max, "hp")}
+                  ${renderStatBlock("MP", game.mp.current, game.mp.max, "mp")}
+                </div>
+                <div class="mt-6 grid gap-3 md:grid-cols-2">
+                  <div class="rounded-2xl bg-white/5 p-4">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Location</p>
+                    <p class="mt-2 text-sm">${safeText(game.location || "Unknown")}</p>
+                  </div>
+                  <div class="rounded-2xl bg-white/5 p-4">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Stats</p>
+                    <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                      <span>STR ${game.stats.str}</span>
+                      <span>AGI ${game.stats.agi}</span>
+                      <span>INT ${game.stats.int}</span>
+                      <span>CHA ${game.stats.cha}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-6 rounded-2xl bg-white/5 p-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Character</p>
+                  <p class="mt-2 text-sm">${safeText(game.pc?.archetype)} ${
+          game.pc?.background ? `• ${game.pc.background}` : ""
+        }</p>
+                  <p class="text-xs text-[color:var(--muted)]">${safeText(
+                    game.pc?.goal
+                  )}</p>
+                </div>
+              </div>
+              <div class="rounded-3xl bg-[color:var(--panel)]/90 p-6">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted)]">Intel</p>
+                    <h3 class="text-lg font-semibold">Session view</h3>
+                  </div>
+                  ${renderTabs(activeTab)}
+                </div>
+                <div class="mt-6" data-tab-panel>
+                  ${
+                    activeTab === "inventory"
+                      ? renderInventory(game)
+                      : activeTab === "combat"
+                      ? renderCombat(game)
+                      : activeTab === "log"
+                      ? renderLog(game)
+                      : renderInventory(game)
+                  }
+                </div>
+              </div>
+            </div>
+            <aside class="space-y-6">
+              ${renderActions(game)}
+            </aside>
+          </section>
+        `;
+      };
+
+      const renderEmpty = () => {
+        return `
+          <section class="rounded-3xl bg-[color:var(--panel)]/80 p-8 text-center">
+            <p class="text-sm text-[color:var(--muted)]">Awaiting game state. Use the setup form to begin.</p>
+          </section>
+        `;
+      };
+
+      const render = () => {
+        const game = getGameState();
+        const setupNeeded = !game || !game.setupComplete;
+
+        app.innerHTML = `
+          <div class="mx-auto flex w-full max-w-6xl flex-col gap-6">
+            <header class="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-[color:var(--panel-strong)]/90 px-6 py-4 shadow-glow">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted)]">Mythweaver</p>
+                <h1 class="text-2xl font-semibold">Custom TTRPG Studio</h1>
+              </div>
+              <div class="flex items-center gap-3">
+                <button id="reset-game" class="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-[color:var(--muted)] hover:text-white">Reset</button>
+              </div>
+            </header>
+            ${setupNeeded ? renderSetup(game) : renderMain(game)}
+            ${!game ? renderEmpty() : ""}
+          </div>
+        `;
+
+        bindEvents(game);
+      };
+
+      const bindEvents = (game) => {
+        const setupForm = document.getElementById("setup-form");
+        if (setupForm) {
+          setupForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = new FormData(setupForm);
+            const payload = {
+              gameId: widgetState.gameId,
+              genre: form.get("genre"),
+              tone: form.get("tone"),
+              storyElements: form.get("storyElements"),
+              startingLocation: form.get("startingLocation"),
+              statFocus: form.get("statFocus") || undefined,
+              pc: {
+                name: form.get("pcName"),
+                pronouns: form.get("pcPronouns"),
+                archetype: form.get("pcArchetype"),
+                background: form.get("pcBackground"),
+              },
+            };
+            await callTool("start_game", payload);
+          });
+        }
+
+        document.querySelectorAll("[data-tab]").forEach((button) => {
+          button.addEventListener("click", () => {
+            setWidgetState({ activeTab: button.dataset.tab });
+            render();
+          });
+        });
+
+        const rollForm = document.getElementById("roll-form");
+        if (rollForm) {
+          rollForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = new FormData(rollForm);
+            await callTool("roll_dice", {
+              gameId: widgetState.gameId,
+              formula: form.get("formula"),
+              reason: form.get("reason"),
+            });
+            rollForm.reset();
+          });
+        }
+
+        const resourceForm = document.getElementById("resource-form");
+        if (resourceForm) {
+          resourceForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = new FormData(resourceForm);
+            const hpDelta = Number(form.get("hpDelta") || 0);
+            const mpDelta = Number(form.get("mpDelta") || 0);
+            await callTool("update_state", {
+              gameId: widgetState.gameId,
+              hpDelta: hpDelta || undefined,
+              mpDelta: mpDelta || undefined,
+              logEntry: "Adjusted resources.",
+            });
+            resourceForm.reset();
+          });
+        }
+
+        const itemForm = document.getElementById("item-form");
+        if (itemForm) {
+          itemForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = new FormData(itemForm);
+            const name = form.get("itemName");
+            if (!name) return;
+            await callTool("update_state", {
+              gameId: widgetState.gameId,
+              inventory: {
+                add: [
+                  {
+                    name,
+                    qty: Number(form.get("itemQty") || 1),
+                    notes: form.get("itemNotes") || "",
+                  },
+                ],
+              },
+              logEntry: `Picked up ${name}.`,
+            });
+            itemForm.reset();
+          });
+        }
+
+        const combatForm = document.getElementById("combat-form");
+        if (combatForm) {
+          combatForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = new FormData(combatForm);
+            const enemyName = form.get("enemyName");
+            if (!enemyName) return;
+            await callTool("update_state", {
+              gameId: widgetState.gameId,
+              combat: {
+                active: true,
+                enemyName,
+                enemyHp: Number(form.get("enemyHp") || 10),
+                enemyHpMax: Number(form.get("enemyHp") || 10),
+                enemyIntent: form.get("enemyIntent") || "",
+              },
+              logEntry: `Engaged ${enemyName}.`,
+              logKind: "combat",
+            });
+            combatForm.reset();
+          });
+        }
+
+        document.querySelectorAll("[data-remove-item]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await callTool("update_state", {
+              gameId: widgetState.gameId,
+              inventory: {
+                remove: [{ id: button.dataset.removeItem, qty: 1 }],
+              },
+              logEntry: "Removed an item.",
+            });
+          });
+        });
+
+        const endCombat = document.querySelector("[data-end-combat]");
+        if (endCombat) {
+          endCombat.addEventListener("click", async () => {
+            await callTool("update_state", {
+              gameId: widgetState.gameId,
+              combat: { active: false },
+              logEntry: "Combat ended.",
+              logKind: "combat",
+            });
+          });
+        }
+
+        const resetButton = document.getElementById("reset-game");
+        if (resetButton) {
+          resetButton.addEventListener("click", async () => {
+            if (!widgetState.gameId) return;
+            await callTool("reset_game", { gameId: widgetState.gameId });
+          });
+        }
+
+        const continueButton = document.getElementById("continue-story");
+        if (continueButton && game) {
+          continueButton.addEventListener("click", async () => {
+            await sendFollowUp(
+              `Continue the story for ${game.pc?.name || "the hero"} in ${
+                game.location || "their current location"
+              }. Use the latest game state to narrate the next scene.`
+            );
+          });
+        }
+
+        const guidanceButton = document.getElementById("summon-gm");
+        if (guidanceButton && game) {
+          guidanceButton.addEventListener("click", async () => {
+            await sendFollowUp(
+              `Offer the player 3 tactical or narrative choices based on the current game state.`
+            );
+          });
+        }
+      };
+
+      render();
+    </script>
+  </body>
+</html>

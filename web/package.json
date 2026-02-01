@@ -1,0 +1,15 @@
+{
+  "name": "rpg-widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/styles.css -o ./dist/tailwind.css --minify",
+    "build:widget": "node ./scripts/build-widget.mjs",
+    "build": "npm run build:css && npm run build:widget"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0",
+    "tailwindcss": "^4.0.0"
+  }
+}
