@@ -4,12 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:css": "tailwindcss -i ./src/styles.css -o ./dist/tailwind.css --minify",
+    "build:css": "tailwindcss -i ./src/main.css -o ./dist/tailwind.css --minify",
+    "build:js": "esbuild ./src/main.tsx --bundle --format=esm --outfile=./dist/widget.js",
     "build:widget": "node ./scripts/build-widget.mjs",
-    "build": "npm run build:css && npm run build:widget"
+    "build": "npm run build:css && npm run build:js && npm run build:widget"
+  },
+  "dependencies": {
+    "@openai/apps-sdk-ui": "^0.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",
+    "esbuild": "^0.25.0",
     "tailwindcss": "^4.0.0"
   }
 }

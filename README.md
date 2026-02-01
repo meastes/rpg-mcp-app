@@ -1,11 +1,11 @@
-# Mythweaver TTRPG App
+# TTRPG ChatGPT App
 
-A custom TTRPG-style ChatGPT App built with the OpenAI Apps SDK + Tailwind 4.
+A custom TTRPG-style ChatGPT App built with the OpenAI Apps SDK, React, and Tailwind 4.
 
 ## Structure
 
 - `server/` MCP server (Node + MCP SDK)
-- `web/` Widget UI (Tailwind 4)
+- `web/` Widget UI (React + Apps SDK UI + Tailwind 4)
 
 ## Build the widget UI
 

@@ -16,7 +16,6 @@ const widgetHtml = readFileSync(widgetPath, "utf8");
 const TOOL_OUTPUT_TEMPLATE = "ui://widget/rpg.html";
 const commonToolMeta = {
   "openai/outputTemplate": TOOL_OUTPUT_TEMPLATE,
-  "openai/widgetAccessible": true,
 };
 
 const games = new Map();
