@@ -318,6 +318,15 @@ const startGameSchema = z.object({
   tone: z.string().optional(),
   storyElements: z.union([z.array(z.string()), z.string()]).optional(),
   startingLocation: z.string().optional(),
+  startingInventory: z
+    .array(
+      z.object({
+        name: z.string(),
+        qty: z.number().int().optional(),
+        notes: z.string().optional(),
+      })
+    )
+    .optional(),
   hpMax: z.number().int().min(1).max(999).optional(),
   mpMax: z.number().int().min(0).max(999).optional(),
   statFocus: z.enum(["str", "agi", "int", "cha"]).optional(),
@@ -459,6 +468,16 @@ function createRpgServer() {
       if (args?.storyElements !== undefined) {
         game.storyElements = normalizeStoryElements(args.storyElements);
       }
+      if (args?.startingInventory !== undefined) {
+        game.inventory = args.startingInventory
+          .filter((item) => item?.name)
+          .map((item) => ({
+            id: `item_${crypto.randomUUID()}`,
+            name: item.name,
+            qty: clamp(Number(item.qty ?? 1), 1, 999),
+            notes: item.notes ?? "",
+          }));
+      }
 
       const desiredHpMax = args?.hpMax ?? game.hp.max;
       const desiredMpMax = args?.mpMax ?? game.mp.max;
@@ -482,15 +501,6 @@ function createRpgServer() {
 
       if (game.setupComplete && !game.location) {
         game.location = "Unknown frontier";
-      }
-
-      if (!existing && game.inventory.length === 0) {
-        game.inventory.push({
-          id: `item_${crypto.randomUUID()}`,
-          name: "Traveler's pack",
-          qty: 1,
-          notes: "Basic gear for the road.",
-        });
       }
 
       persistGame(game);
