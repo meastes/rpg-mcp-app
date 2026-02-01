@@ -527,10 +527,10 @@ export function App() {
                         >
                           {enemy.severity}
                         </Badge>
-                        {enemy.note && (
-                          <span className="text-xs text-muted-foreground">{enemy.note}</span>
-                        )}
                       </div>
+                      {enemy.note && (
+                        <p className="mt-1 text-xs text-muted-foreground">{enemy.note}</p>
+                      )}
                     </div>
                   ))
                 )}

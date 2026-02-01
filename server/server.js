@@ -221,6 +221,26 @@ function getEnemyStatus(hp, hpMax) {
 
 function applyCombatUpdate(game, combatUpdate) {
   if (!combatUpdate) return;
+  if (combatUpdate.pcHp !== undefined) {
+    game.hp.current = clamp(Number(combatUpdate.pcHp), 0, game.hp.max);
+  }
+  if (combatUpdate.pcHpDelta !== undefined) {
+    game.hp.current = clamp(
+      game.hp.current + Number(combatUpdate.pcHpDelta),
+      0,
+      game.hp.max
+    );
+  }
+  if (combatUpdate.pcMp !== undefined) {
+    game.mp.current = clamp(Number(combatUpdate.pcMp), 0, game.mp.max);
+  }
+  if (combatUpdate.pcMpDelta !== undefined) {
+    game.mp.current = clamp(
+      game.mp.current + Number(combatUpdate.pcMpDelta),
+      0,
+      game.mp.max
+    );
+  }
   if (combatUpdate.active === false) {
     game.combat = null;
     game.phase = "exploration";
@@ -386,6 +406,10 @@ const updateStateSchema = z.object({
       active: z.boolean(),
       round: z.number().int().optional(),
       currentTurnId: z.string().optional(),
+      pcHp: z.number().int().optional(),
+      pcHpDelta: z.number().int().optional(),
+      pcMp: z.number().int().optional(),
+      pcMpDelta: z.number().int().optional(),
       enemyName: z.string().optional(),
       enemyHp: z.number().int().optional(),
       enemyHpMax: z.number().int().optional(),
