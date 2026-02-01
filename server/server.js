@@ -329,6 +329,8 @@ const startGameSchema = z.object({
     .optional(),
   hpMax: z.number().int().min(1).max(999).optional(),
   mpMax: z.number().int().min(0).max(999).optional(),
+  startingHp: z.number().int().min(0).max(999).optional(),
+  startingMp: z.number().int().min(0).max(999).optional(),
   statFocus: z.enum(["str", "agi", "int", "cha"]).optional(),
   pc: z
     .object({
@@ -484,8 +486,27 @@ function createRpgServer() {
 
       game.hp.max = clamp(Number(desiredHpMax), 1, 999);
       game.mp.max = clamp(Number(desiredMpMax), 0, 999);
-      game.hp.current = clamp(game.hp.current, 0, game.hp.max);
-      game.mp.current = clamp(game.mp.current, 0, game.mp.max);
+
+      const shouldResetVitals = !existing || game.phase === "setup";
+      if (shouldResetVitals) {
+        const startingHp =
+          args?.startingHp !== undefined ? Number(args.startingHp) : game.hp.max;
+        const startingMp =
+          args?.startingMp !== undefined ? Number(args.startingMp) : game.mp.max;
+        game.hp.current = clamp(startingHp, 0, game.hp.max);
+        game.mp.current = clamp(startingMp, 0, game.mp.max);
+      } else {
+        if (args?.startingHp !== undefined) {
+          game.hp.current = clamp(Number(args.startingHp), 0, game.hp.max);
+        } else {
+          game.hp.current = clamp(game.hp.current, 0, game.hp.max);
+        }
+        if (args?.startingMp !== undefined) {
+          game.mp.current = clamp(Number(args.startingMp), 0, game.mp.max);
+        } else {
+          game.mp.current = clamp(game.mp.current, 0, game.mp.max);
+        }
+      }
 
       if (!existing && args?.statFocus) {
         game.stats = withStatFocus(game.stats, args.statFocus);
