@@ -348,10 +348,8 @@ export function App() {
           accent: "secondary",
         };
 
-  const containerWidth = "max-w-[440px]";
-
   return (
-    <div className={`mx-auto w-full ${containerWidth} p-3 sm:p-4`}>
+    <div className="mx-auto w-full max-w-2xl p-3 sm:p-4">
       <div className="space-y-3">
         <Card className="rounded-2xl shadow-sm">
           <CardContent className="pt-6">
