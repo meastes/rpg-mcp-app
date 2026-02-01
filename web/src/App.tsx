@@ -14,6 +14,15 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
+import {
+  Backpack,
+  BarChart3,
+  Heart,
+  ListOrdered,
+  Sparkles,
+  Swords,
+  User,
+} from "lucide-react";
 
 const SET_GLOBALS_EVENT = "openai:set_globals";
 
@@ -68,6 +77,40 @@ type ToolOutput = GameState | { type: string } | null;
 
 type SetGlobalsEvent = CustomEvent<{ globals: { toolOutput?: ToolOutput } }>;
 
+type EnemySeverity =
+  | "Unhurt"
+  | "Scratched"
+  | "Wounded"
+  | "Badly Wounded"
+  | "Critical"
+  | "Down";
+
+type Enemy = {
+  id: string;
+  name: string;
+  severity: EnemySeverity;
+  note?: string;
+};
+
+type GameMode = "explore" | "combat";
+
+type StatKey = "STR" | "DEX" | "CON" | "INT" | "WIS" | "CHA";
+
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
+
+const severityTone: Record<
+  EnemySeverity,
+  { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
+> = {
+  Unhurt: { label: "Unhurt", variant: "outline" },
+  Scratched: { label: "Scratched", variant: "secondary" },
+  Wounded: { label: "Wounded", variant: "default" },
+  "Badly Wounded": { label: "Badly", variant: "default" },
+  Critical: { label: "Critical", variant: "destructive" },
+  Down: { label: "Down", variant: "destructive" },
+};
+
 function useToolOutput(): ToolOutput {
   const [output, setOutput] = useState<ToolOutput>(
     () => window.openai?.toolOutput ?? null
@@ -88,75 +131,156 @@ function useToolOutput(): ToolOutput {
   return output;
 }
 
-function formatPercent(value: number, max: number) {
-  if (!max || max <= 0) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / max) * 100)));
-}
-
 function Section({
   title,
+  subtitle,
+  icon,
   children,
-  defaultOpen = true,
 }: {
   title: string;
+  subtitle?: string;
+  icon?: ReactNode;
   children: ReactNode;
-  defaultOpen?: boolean;
 }) {
+  const headerContent = (
+    <>
+      <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <CardTitle className="text-base leading-tight">{title}</CardTitle>
+        {subtitle ? (
+          <CardDescription className="mt-1 line-clamp-2">
+            {subtitle}
+          </CardDescription>
+        ) : null}
+      </div>
+    </>
+  );
   return (
-    <Card className="border-white/10 bg-white/5 shadow-none">
-      <CardContent className="pt-4">
-        <Accordion
-          type="single"
-          collapsible
-          defaultValue={defaultOpen ? "section" : undefined}
-        >
-          <AccordionItem value="section" className="border-none">
-            <AccordionTrigger className="py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[color:var(--muted)] hover:text-foreground">
-              {title}
-            </AccordionTrigger>
-            <AccordionContent className="pt-2">{children}</AccordionContent>
-          </AccordionItem>
-        </Accordion>
-      </CardContent>
+    <Card className="rounded-2xl shadow-sm">
+      <CardHeader className="space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-3 transition-colors hover:text-foreground">
+            {headerContent}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">{children}</CardContent>
     </Card>
   );
 }
 
-function StatBar({ label, current, max, tone }: { label: string; current: number; max: number; tone: "hp" | "mp" }) {
+function AccordionSection({
+  title,
+  subtitle,
+  icon,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl shadow-sm">
+      <Accordion
+        type="single"
+        collapsible
+        defaultValue={defaultOpen ? "section" : undefined}
+        className="w-full"
+      >
+        <AccordionItem value="section" className="border-none">
+          <CardHeader className="space-y-2">
+            <AccordionTrigger className="py-0 hover:no-underline cursor-pointer">
+              <div className="flex w-full items-start justify-between gap-3 text-left">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
+                    {icon}
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-base leading-tight">
+                      {title}
+                    </CardTitle>
+                    {subtitle ? (
+                      <CardDescription className="mt-1 line-clamp-2">
+                        {subtitle}
+                      </CardDescription>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </AccordionTrigger>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <AccordionContent className="pt-0">
+              {children}
+            </AccordionContent>
+          </CardContent>
+        </AccordionItem>
+      </Accordion>
+    </Card>
+  );
+}
+
+function Meter({
+  label,
+  icon,
+  value,
+  max,
+  tone,
+}: {
+  label: string;
+  icon: ReactNode;
+  value: number;
+  max: number;
+  tone: "hp" | "mp";
+}) {
+  const safeMax = Math.max(0, max);
+  const safeValue = clamp(value, 0, safeMax);
+  const pct = safeMax > 0 ? Math.round((safeValue / safeMax) * 100) : 0;
   const indicatorStyle =
     tone === "hp"
       ? { backgroundColor: "var(--destructive)" }
       : { backgroundColor: "var(--primary)" };
-  const safeMax = Number.isFinite(max) && max > 0 ? max : 0;
-  const safeCurrent = Number.isFinite(current) ? current : 0;
+
   return (
-    <Card className="border-white/10 bg-[color:var(--panel)]/90">
-      <CardContent className="pt-4">
-        <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
-          <span>{label}</span>
-          <span>
-            {safeCurrent} / {safeMax}
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/60">
+            {icon}
           </span>
+          <span className="truncate">{label}</span>
         </div>
-        <Progress
-          className="mt-3 bg-white/10"
-          indicatorStyle={indicatorStyle}
-          value={formatPercent(safeCurrent, safeMax)}
-        />
-      </CardContent>
-    </Card>
+        <div className="text-sm tabular-nums">
+          <span className="font-semibold">{safeValue}</span>
+          <span className="text-muted-foreground">/{safeMax}</span>
+        </div>
+      </div>
+      <Progress
+        value={pct}
+        className="h-2 rounded-full"
+        indicatorStyle={indicatorStyle}
+      />
+    </div>
   );
 }
 
-function PhaseBadge({ phase }: { phase: string }) {
-  const toneMap: Record<string, "secondary" | "default" | "destructive"> = {
-    setup: "secondary",
-    exploration: "default",
-    combat: "destructive",
-  };
+function formatStatValue(value?: number) {
+  if (value === undefined || value === null || Number.isNaN(value)) return "--";
+  return value;
+}
 
-  const color = toneMap[phase] ?? "secondary";
-  return <Badge variant={color}>{phase}</Badge>;
+function getSeverityFromPercent(percent: number): EnemySeverity {
+  if (percent <= 0) return "Down";
+  if (percent <= 15) return "Critical";
+  if (percent <= 35) return "Badly Wounded";
+  if (percent <= 60) return "Wounded";
+  if (percent <= 85) return "Scratched";
+  return "Unhurt";
 }
 
 export function App() {
@@ -170,171 +294,229 @@ export function App() {
 
   if (!game) {
     return (
-      <Card className="mx-auto flex min-h-[280px] w-full max-w-3xl flex-col items-center justify-center rounded-3xl border-white/10 bg-[color:var(--panel)]/80 p-8 text-center">
-        <p className="text-sm text-[color:var(--muted)]">Waiting for game state.</p>
-        <p className="mt-2 text-xs text-[color:var(--muted)]">
-          Ask ChatGPT to start the adventure, then the widget will update automatically.
-        </p>
-      </Card>
+      <div className="mx-auto w-full max-w-[440px] p-3 sm:p-4">
+        <Card className="rounded-2xl shadow-sm">
+          <CardContent className="py-8 text-center">
+            <p className="text-sm text-muted-foreground">Waiting for game state.</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Ask ChatGPT to start the adventure, then the widget will update automatically.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
-  const storyElements = (game.storyElements ?? []).filter(Boolean);
   const inventory = game.inventory ?? [];
-  const log = game.log ?? [];
+  const mode: GameMode = game.phase === "combat" ? "combat" : "explore";
+  const characterName = game.pc?.name ?? "Unnamed hero";
+
+  const hpMax = game.hp?.max ?? 0;
+  const hp = game.hp?.current ?? 0;
+  const mpMax = game.mp?.max ?? 0;
+  const mp = game.mp?.current ?? 0;
+
+  const stats: Record<StatKey, number | undefined> = {
+    STR: game.stats?.str,
+    DEX: game.stats?.agi,
+    CON: undefined,
+    INT: game.stats?.int,
+    WIS: undefined,
+    CHA: game.stats?.cha,
+  };
+
+  const storyElements = (game.storyElements ?? []).filter(Boolean);
+
+  const enemies: Enemy[] = game.combat
+    ? [
+        {
+          id: "enemy-1",
+          name: game.combat.enemyName || "Unknown foe",
+          severity: getSeverityFromPercent(
+            game.combat.enemyHpMax > 0
+              ? Math.round((game.combat.enemyHp / game.combat.enemyHpMax) * 100)
+              : 0
+          ),
+          note: game.combat.enemyIntent,
+        },
+      ]
+    : [];
+
+  const statusChip =
+    mode === "combat"
+      ? { label: "Combat", icon: <Swords className="h-4 w-4" />, accent: "outline" }
+      : {
+          label: "Exploration",
+          icon: <BarChart3 className="h-4 w-4" />,
+          accent: "secondary",
+        };
+
+  const containerWidth = "max-w-[440px]";
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <Card className="rounded-3xl border-white/10 bg-[color:var(--panel-strong)]/90 shadow-glow">
-        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 px-6 py-5">
-          <div>
-            <CardDescription className="text-xs uppercase tracking-[0.3em] text-[color:var(--muted)]">
-              Game State
-            </CardDescription>
-            <CardTitle className="text-2xl">
-              {game.pc?.name ? game.pc.name : "Unnamed hero"}
-            </CardTitle>
-            <CardDescription className="text-sm text-[color:var(--muted)]">
-              {[game.genre, game.tone].filter(Boolean).join(" • ") || "Details incoming"}
-            </CardDescription>
-          </div>
-          <PhaseBadge phase={game.phase} />
-        </CardHeader>
-      </Card>
-
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="space-y-6">
-          <Card className="rounded-3xl border-white/10 bg-[color:var(--panel)]/90 shadow-glow">
-            <CardContent className="p-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              {game.hp && <StatBar label="HP" current={game.hp.current} max={game.hp.max} tone="hp" />}
-              {game.mp && game.mp.max > 0 && (
-                <StatBar label="MP" current={game.mp.current} max={game.mp.max} tone="mp" />
-              )}
-            </div>
-
-            <div className="mt-6 grid gap-3 md:grid-cols-2">
-              <Section title="Location">
-                <p className="text-sm">{game.location || "Unknown"}</p>
-              </Section>
-              <Section title="Stats">
-                {game.stats ? (
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <span>STR {game.stats.str}</span>
-                    <span>AGI {game.stats.agi}</span>
-                    <span>INT {game.stats.int}</span>
-                    <span>CHA {game.stats.cha}</span>
-                  </div>
-                ) : (
-                  <p className="text-sm text-[color:var(--muted)]">Stats pending.</p>
-                )}
-              </Section>
-            </div>
-
-            <div className="mt-6 grid gap-3">
-              {(game.pc?.archetype || game.pc?.background) && (
-                <Section title="Character">
-                  <p className="text-sm">
-                    {[game.pc?.archetype, game.pc?.background].filter(Boolean).join(" • ")}
-                  </p>
-                  {game.pc?.goal && (
-                    <p className="mt-2 text-xs text-[color:var(--muted)]">Goal: {game.pc.goal}</p>
-                  )}
-                </Section>
-              )}
-
-              {storyElements.length > 0 && (
-                <Section title="Story elements">
-                  <ul className="grid gap-2 text-sm">
-                    {storyElements.map((element, index) => (
-                      <li key={`${element}-${index}`} className="rounded-xl bg-white/5 px-3 py-2">
-                        {element}
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-
-            {game.lastRoll && (
-              <Section title="Last roll">
-                <p className="text-sm font-semibold">
-                  {game.lastRoll.formula} = {game.lastRoll.total}
+    <div className={`mx-auto w-full ${containerWidth} p-3 sm:p-4`}>
+      <div className="space-y-3">
+        <Card className="rounded-2xl shadow-sm">
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <Badge variant={statusChip.accent as "secondary" | "outline"} className="rounded-full">
+                  <span className="inline-flex items-center gap-1.5">
+                    {statusChip.icon}
+                    {statusChip.label}
+                  </span>
+                </Badge>
+                <h1 className="mt-3 text-3xl font-semibold leading-tight truncate">
+                  {characterName}
+                </h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {game.location ? `Location: ${game.location}` : "Character session tracker"}
                 </p>
-                {game.lastRoll.reason && (
-                  <p className="mt-1 text-xs text-[color:var(--muted)]">{game.lastRoll.reason}</p>
+                {(game.genre || game.tone) && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {[game.genre, game.tone].filter(Boolean).join(" • ")}
+                  </p>
                 )}
-              </Section>
+              </div>
+              <div className="mt-1 inline-flex h-12 w-12 items-center justify-center rounded-2xl border bg-background/60">
+                <User className="h-6 w-6" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Section title="Resources" subtitle="HP / MP" icon={<Heart className="h-4 w-4" />}>
+          <div className="space-y-4">
+            <Meter
+              label="HP"
+              icon={<Heart className="h-4 w-4" />}
+              value={hp}
+              max={hpMax}
+              tone="hp"
+            />
+            {mpMax > 0 && (
+              <Meter
+                label="MP"
+                icon={<Sparkles className="h-4 w-4" />}
+                value={mp}
+                max={mpMax}
+                tone="mp"
+              />
             )}
           </div>
-            </CardContent>
-          </Card>
-        </div>
+        </Section>
 
-        <aside className="space-y-6">
-          {inventory.length > 0 && (
-            <Section title="Inventory">
-              <ul className="space-y-2 text-sm">
-                {inventory.map((item) => (
-                  <li key={item.id} className="rounded-xl bg-white/5 px-3 py-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold">{item.name}</span>
-                      <span className="text-xs text-[color:var(--muted)]">x{item.qty}</span>
-                    </div>
+        <AccordionSection
+          title="Stats"
+          subtitle="Full scores"
+          icon={<BarChart3 className="h-4 w-4" />}
+          defaultOpen
+        >
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(stats) as StatKey[]).map((key) => (
+              <div
+                key={key}
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium"
+              >
+                <span className="text-muted-foreground">{key}</span>
+                <span className="tabular-nums">{formatStatValue(stats[key])}</span>
+              </div>
+            ))}
+          </div>
+        </AccordionSection>
+
+        <AccordionSection
+          title="Inventory"
+          subtitle={inventory.length ? "Flat list" : "No items yet"}
+          icon={<Backpack className="h-4 w-4" />}
+          defaultOpen={false}
+        >
+          <div className="space-y-2">
+            {inventory.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Inventory is empty.</p>
+            ) : (
+              inventory.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-start justify-between gap-3 rounded-2xl border p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{item.name}</p>
                     {item.notes && (
-                      <p className="mt-1 text-xs text-[color:var(--muted)]">{item.notes}</p>
+                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                        {item.notes}
+                      </p>
                     )}
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          {game.combat && (
-            <Section title="Combat">
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Enemy</p>
-                  <p className="text-lg font-semibold">{game.combat.enemyName}</p>
-                  {game.combat.enemyIntent && (
-                    <p className="text-xs text-[color:var(--muted)]">{game.combat.enemyIntent}</p>
-                  )}
-                </div>
-                <div className="rounded-xl bg-white/5 p-3">
-                  <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
-                    <span>Enemy HP</span>
-                    <span>
-                      {game.combat.enemyHp} / {game.combat.enemyHpMax}
-                    </span>
                   </div>
-                  <Progress
-                    className="mt-2 bg-white/10"
-                    indicatorStyle={{ backgroundColor: "var(--warning)" }}
-                    value={formatPercent(game.combat.enemyHp, game.combat.enemyHpMax)}
-                  />
+                  <Badge variant="secondary" className="rounded-full tabular-nums">
+                    x{item.qty}
+                  </Badge>
+                </div>
+              ))
+            )}
+          </div>
+        </AccordionSection>
+
+        {storyElements.length > 0 && (
+          <Section title="Story elements" subtitle="Active threads" icon={<Sparkles className="h-4 w-4" />}>
+            <div className="flex flex-wrap gap-2">
+              {storyElements.map((element, index) => (
+                <Badge key={`${element}-${index}`} variant="outline" className="rounded-full">
+                  {element}
+                </Badge>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {mode === "combat" && (
+          <div className="space-y-3">
+            <AccordionSection
+              title="Initiative"
+              subtitle="Turn order"
+              icon={<ListOrdered className="h-4 w-4" />}
+              defaultOpen
+            >
+              <div className="space-y-2">
+                <div className="rounded-2xl border p-3 text-sm text-muted-foreground">
+                  Initiative order will appear here.
                 </div>
               </div>
-            </Section>
-          )}
+            </AccordionSection>
 
-          {log.length > 0 && (
-            <Section title="Recent log" defaultOpen={false}>
-              <ol className="space-y-2 text-sm">
-                {log
-                  .slice()
-                  .reverse()
-                  .slice(0, 6)
-                  .map((entry) => (
-                    <li key={entry.id} className="rounded-xl bg-white/5 px-3 py-2">
-                      <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">
-                        {entry.kind}
-                      </p>
-                      <p>{entry.text}</p>
-                    </li>
-                  ))}
-              </ol>
-            </Section>
-          )}
-        </aside>
+            <AccordionSection
+              title="Combat tracker"
+              subtitle="Qualitative damage"
+              icon={<Swords className="h-4 w-4" />}
+              defaultOpen
+            >
+              <div className="space-y-2">
+                {enemies.length === 0 ? (
+                  <div className="rounded-2xl border p-3 text-sm text-muted-foreground">
+                    No enemies yet.
+                  </div>
+                ) : (
+                  enemies.map((enemy) => (
+                    <div key={enemy.id} className="rounded-2xl border p-3">
+                      <p className="text-sm font-semibold">{enemy.name}</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Badge
+                          variant={severityTone[enemy.severity].variant}
+                          className="rounded-full"
+                        >
+                          {enemy.severity}
+                        </Badge>
+                        {enemy.note && (
+                          <span className="text-xs text-muted-foreground">{enemy.note}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </AccordionSection>
+          </div>
+        )}
       </div>
     </div>
   );
