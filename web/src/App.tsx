@@ -21,7 +21,6 @@ import {
   ListOrdered,
   Sparkles,
   Swords,
-  User,
 } from "lucide-react";
 
 const SET_GLOBALS_EVENT = "openai:set_globals";
@@ -325,8 +324,6 @@ export function App() {
     CHA: game.stats?.cha,
   };
 
-  const storyElements = (game.storyElements ?? []).filter(Boolean);
-
   const enemies: Enemy[] = game.combat
     ? [
         {
@@ -360,26 +357,23 @@ export function App() {
           <CardContent className="pt-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
+                <h1
+                  className="font-semibold leading-tight tracking-tight truncate"
+                  style={{ fontSize: "clamp(1.5rem, 3.2vw, 2.25rem)" }}
+                >
+                  {characterName}
+                </h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {game.location ? `Location: ${game.location}` : "Character session tracker"}
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-3">
                 <Badge variant={statusChip.accent as "secondary" | "outline"} className="rounded-full">
                   <span className="inline-flex items-center gap-1.5">
                     {statusChip.icon}
                     {statusChip.label}
                   </span>
                 </Badge>
-                <h1 className="mt-3 text-3xl font-semibold leading-tight truncate">
-                  {characterName}
-                </h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {game.location ? `Location: ${game.location}` : "Character session tracker"}
-                </p>
-                {(game.genre || game.tone) && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {[game.genre, game.tone].filter(Boolean).join(" • ")}
-                  </p>
-                )}
-              </div>
-              <div className="mt-1 inline-flex h-12 w-12 items-center justify-center rounded-2xl border bg-background/60">
-                <User className="h-6 w-6" />
               </div>
             </div>
           </CardContent>
@@ -456,18 +450,6 @@ export function App() {
             )}
           </div>
         </AccordionSection>
-
-        {storyElements.length > 0 && (
-          <Section title="Story elements" subtitle="Active threads" icon={<Sparkles className="h-4 w-4" />}>
-            <div className="flex flex-wrap gap-2">
-              {storyElements.map((element, index) => (
-                <Badge key={`${element}-${index}`} variant="outline" className="rounded-full">
-                  {element}
-                </Badge>
-              ))}
-            </div>
-          </Section>
-        )}
 
         {mode === "combat" && (
           <div className="space-y-3">
