@@ -1,4 +1,5 @@
 import type { StorybookConfig } from "@storybook/react-vite";
+import tsconfigPaths from "vite-tsconfig-paths";
 
 const config: StorybookConfig = {
   framework: {
@@ -9,6 +10,11 @@ const config: StorybookConfig = {
   addons: [
     "@storybook/addon-essentials",
   ],
+  viteFinal: async (config) => {
+    config.plugins = config.plugins ?? [];
+    config.plugins.push(tsconfigPaths());
+    return config;
+  },
 };
 
 export default config;

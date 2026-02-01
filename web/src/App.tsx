@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Badge } from "@openai/apps-sdk-ui/components/Badge";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Progress } from "@/components/ui/progress";
 
 const SET_GLOBALS_EVENT = "openai:set_globals";
 
@@ -79,50 +93,70 @@ function formatPercent(value: number, max: number) {
   return Math.min(100, Math.max(0, Math.round((value / max) * 100)));
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  title,
+  children,
+  defaultOpen = true,
+}: {
+  title: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-[0.22em] text-[color:var(--muted)]">
-          {title}
-        </p>
-      </div>
-      {children}
-    </section>
+    <Card className="border-white/10 bg-white/5 shadow-none">
+      <CardContent className="pt-4">
+        <Accordion
+          type="single"
+          collapsible
+          defaultValue={defaultOpen ? "section" : undefined}
+        >
+          <AccordionItem value="section" className="border-none">
+            <AccordionTrigger className="py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[color:var(--muted)] hover:text-foreground">
+              {title}
+            </AccordionTrigger>
+            <AccordionContent className="pt-2">{children}</AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </CardContent>
+    </Card>
   );
 }
 
 function StatBar({ label, current, max, tone }: { label: string; current: number; max: number; tone: "hp" | "mp" }) {
-  const barTone = tone === "mp" ? "bg-[color:var(--accent)]" : "bg-[color:var(--danger)]";
+  const indicatorStyle =
+    tone === "hp"
+      ? { backgroundColor: "var(--destructive)" }
+      : { backgroundColor: "var(--primary)" };
+  const safeMax = Number.isFinite(max) && max > 0 ? max : 0;
+  const safeCurrent = Number.isFinite(current) ? current : 0;
   return (
-    <div className="rounded-2xl bg-[color:var(--panel)]/90 p-4">
-      <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
-        <span>{label}</span>
-        <span>
-          {current} / {max}
-        </span>
-      </div>
-      <div className="mt-3 h-2 rounded-full bg-white/10">
-        <div
-          className={`h-2 rounded-full ${barTone}`}
-          style={{ width: `${formatPercent(current, max)}%` }}
+    <Card className="border-white/10 bg-[color:var(--panel)]/90">
+      <CardContent className="pt-4">
+        <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
+          <span>{label}</span>
+          <span>
+            {safeCurrent} / {safeMax}
+          </span>
+        </div>
+        <Progress
+          className="mt-3 bg-white/10"
+          indicatorStyle={indicatorStyle}
+          value={formatPercent(safeCurrent, safeMax)}
         />
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function PhaseBadge({ phase }: { phase: string }) {
-  const toneMap: Record<string, string> = {
-    setup: "warning",
-    exploration: "success",
-    combat: "danger",
+  const toneMap: Record<string, "secondary" | "default" | "destructive"> = {
+    setup: "secondary",
+    exploration: "default",
+    combat: "destructive",
   };
 
   const color = toneMap[phase] ?? "secondary";
-  return (
-    <Badge color={color as "success" | "warning" | "danger" | "secondary"}>{phase}</Badge>
-  );
+  return <Badge variant={color}>{phase}</Badge>;
 }
 
 export function App() {
@@ -136,12 +170,12 @@ export function App() {
 
   if (!game) {
     return (
-      <div className="mx-auto flex min-h-[280px] w-full max-w-3xl flex-col items-center justify-center rounded-3xl border border-white/10 bg-[color:var(--panel)]/80 p-8 text-center">
+      <Card className="mx-auto flex min-h-[280px] w-full max-w-3xl flex-col items-center justify-center rounded-3xl border-white/10 bg-[color:var(--panel)]/80 p-8 text-center">
         <p className="text-sm text-[color:var(--muted)]">Waiting for game state.</p>
         <p className="mt-2 text-xs text-[color:var(--muted)]">
           Ask ChatGPT to start the adventure, then the widget will update automatically.
         </p>
-      </div>
+      </Card>
     );
   }
 
@@ -151,24 +185,27 @@ export function App() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <header className="rounded-3xl border border-white/10 bg-[color:var(--panel-strong)]/90 px-6 py-5 shadow-glow">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <Card className="rounded-3xl border-white/10 bg-[color:var(--panel-strong)]/90 shadow-glow">
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 px-6 py-5">
           <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--muted)]">Game State</p>
-            <h1 className="text-2xl font-semibold">
+            <CardDescription className="text-xs uppercase tracking-[0.3em] text-[color:var(--muted)]">
+              Game State
+            </CardDescription>
+            <CardTitle className="text-2xl">
               {game.pc?.name ? game.pc.name : "Unnamed hero"}
-            </h1>
-            <p className="text-sm text-[color:var(--muted)]">
+            </CardTitle>
+            <CardDescription className="text-sm text-[color:var(--muted)]">
               {[game.genre, game.tone].filter(Boolean).join(" • ") || "Details incoming"}
-            </p>
+            </CardDescription>
           </div>
           <PhaseBadge phase={game.phase} />
-        </div>
-      </header>
+        </CardHeader>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-6">
-          <section className="rounded-3xl bg-[color:var(--panel)]/90 p-6 shadow-glow">
+          <Card className="rounded-3xl border-white/10 bg-[color:var(--panel)]/90 shadow-glow">
+            <CardContent className="p-6">
             <div className="grid gap-4 md:grid-cols-2">
               {game.hp && <StatBar label="HP" current={game.hp.current} max={game.hp.max} tone="hp" />}
               {game.mp && game.mp.max > 0 && (
@@ -218,18 +255,19 @@ export function App() {
                 </Section>
               )}
 
-              {game.lastRoll && (
-                <Section title="Last roll">
-                  <p className="text-sm font-semibold">
-                    {game.lastRoll.formula} = {game.lastRoll.total}
-                  </p>
-                  {game.lastRoll.reason && (
-                    <p className="mt-1 text-xs text-[color:var(--muted)]">{game.lastRoll.reason}</p>
-                  )}
-                </Section>
-              )}
-            </div>
-          </section>
+            {game.lastRoll && (
+              <Section title="Last roll">
+                <p className="text-sm font-semibold">
+                  {game.lastRoll.formula} = {game.lastRoll.total}
+                </p>
+                {game.lastRoll.reason && (
+                  <p className="mt-1 text-xs text-[color:var(--muted)]">{game.lastRoll.reason}</p>
+                )}
+              </Section>
+            )}
+          </div>
+            </CardContent>
+          </Card>
         </div>
 
         <aside className="space-y-6">
@@ -268,19 +306,18 @@ export function App() {
                       {game.combat.enemyHp} / {game.combat.enemyHpMax}
                     </span>
                   </div>
-                  <div className="mt-2 h-2 rounded-full bg-white/10">
-                    <div
-                      className="h-2 rounded-full bg-[color:var(--ember)]"
-                      style={{ width: `${formatPercent(game.combat.enemyHp, game.combat.enemyHpMax)}%` }}
-                    />
-                  </div>
+                  <Progress
+                    className="mt-2 bg-white/10"
+                    indicatorStyle={{ backgroundColor: "var(--warning)" }}
+                    value={formatPercent(game.combat.enemyHp, game.combat.enemyHpMax)}
+                  />
                 </div>
               </div>
             </Section>
           )}
 
           {log.length > 0 && (
-            <Section title="Recent log">
+            <Section title="Recent log" defaultOpen={false}>
               <ol className="space-y-2 text-sm">
                 {log
                   .slice()

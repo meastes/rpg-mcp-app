@@ -1,8 +1,6 @@
 @import "tailwindcss";
-@import "@openai/apps-sdk-ui/css";
 
 @source "../src/**/*.{ts,tsx,html}";
-@source "../node_modules/@openai/apps-sdk-ui";
 
 :root {
   color-scheme: dark;
@@ -12,11 +10,34 @@
   --panel-strong: #1b2740;
   --ink: #e6edf7;
   --muted: #9aa7c7;
-  --accent: #2dd4bf;
-  --accent-strong: #14b8a6;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
   --ember: #f59e0b;
   --danger: #fb7185;
   --success: #22c55e;
+
+  --background: #0b0e16;
+  --foreground: #e6edf7;
+  --card: #141c2b;
+  --card-foreground: #e6edf7;
+  --popover: #141c2b;
+  --popover-foreground: #e6edf7;
+  --primary: #3b82f6;
+  --primary-foreground: #0b1220;
+  --secondary: #1b2740;
+  --secondary-foreground: #e6edf7;
+  --muted-foreground: #9aa7c7;
+  --accent-foreground: #0b1220;
+  --destructive: #fb7185;
+  --destructive-foreground: #0b0e16;
+  --border: #1f2a3d;
+  --input: #1f2a3d;
+  --ring: #3b82f6;
+  --radius: 0.9rem;
+
+  --warning: #f59e0b;
+  --warning-foreground: #1a1205;
+  --danger-foreground: #16070b;
 }
 
 * {
@@ -31,6 +52,12 @@ body {
   background: radial-gradient(1200px 600px at 20% -10%, rgba(45, 212, 191, 0.15), transparent 60%),
     radial-gradient(900px 500px at 90% 0%, rgba(245, 158, 11, 0.14), transparent 55%),
     linear-gradient(160deg, #0b0e16 10%, #0c1420 40%, #0b0e16 80%);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 }
 
 input,
