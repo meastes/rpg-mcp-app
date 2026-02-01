@@ -660,7 +660,24 @@ function createRpgServer() {
       }
 
       applyInventoryDelta(game, args?.inventory);
-      applyCombatUpdate(game, args?.combat);
+      const combatUpdate = args?.combat
+        ? { ...args.combat }
+        : null;
+      if (combatUpdate) {
+        const hasTopLevelHp =
+          args?.hp !== undefined || args?.hpDelta !== undefined;
+        const hasTopLevelMp =
+          args?.mp !== undefined || args?.mpDelta !== undefined;
+        if (hasTopLevelHp) {
+          delete combatUpdate.pcHp;
+          delete combatUpdate.pcHpDelta;
+        }
+        if (hasTopLevelMp) {
+          delete combatUpdate.pcMp;
+          delete combatUpdate.pcMpDelta;
+        }
+      }
+      applyCombatUpdate(game, combatUpdate);
 
       if (args?.logEntry) {
         addLog(game, args.logEntry, args.logKind ?? "story");
