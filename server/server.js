@@ -206,6 +206,19 @@ function applyInventoryDelta(game, delta) {
   }
 }
 
+function getEnemyStatus(hp, hpMax) {
+  const safeMax = Number.isFinite(hpMax) && hpMax > 0 ? hpMax : 0;
+  const safeHp = Number.isFinite(hp) ? hp : 0;
+  if (!safeMax) return "Unhurt";
+  const pct = (safeHp / safeMax) * 100;
+  if (pct <= 0) return "Down";
+  if (pct <= 15) return "Critical";
+  if (pct <= 35) return "Badly Wounded";
+  if (pct <= 60) return "Wounded";
+  if (pct <= 85) return "Scratched";
+  return "Unhurt";
+}
+
 function applyCombatUpdate(game, combatUpdate) {
   if (!combatUpdate) return;
   if (combatUpdate.active === false) {
@@ -216,21 +229,86 @@ function applyCombatUpdate(game, combatUpdate) {
   }
 
   if (combatUpdate.active === true) {
-    const enemyHpMax = clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999);
-    const enemyHp = clamp(
-      Number(combatUpdate.enemyHp ?? enemyHpMax),
-      0,
-      enemyHpMax
-    );
+    const enemiesInput = Array.isArray(combatUpdate.enemies)
+      ? combatUpdate.enemies
+      : [];
+
+    const enemies =
+      enemiesInput.length > 0
+        ? enemiesInput
+            .map((enemy) => {
+              if (!enemy?.name) return null;
+              const hpMax = clamp(Number(enemy.hpMax ?? 10), 1, 999);
+              const hp = clamp(Number(enemy.hp ?? hpMax), 0, hpMax);
+              return {
+                id: enemy.id ?? `enemy_${crypto.randomUUID()}`,
+                name: enemy.name,
+                hp,
+                hpMax,
+                status: enemy.status ?? getEnemyStatus(hp, hpMax),
+                intent: enemy.intent ?? "",
+                note: enemy.note ?? "",
+              };
+            })
+            .filter(Boolean)
+        : [
+            {
+              id: `enemy_${crypto.randomUUID()}`,
+              name: combatUpdate.enemyName ?? "Unknown threat",
+              hp: clamp(
+                Number(combatUpdate.enemyHp ?? combatUpdate.enemyHpMax ?? 10),
+                0,
+                clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999)
+              ),
+              hpMax: clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999),
+              status: getEnemyStatus(
+                Number(combatUpdate.enemyHp ?? combatUpdate.enemyHpMax ?? 10),
+                Number(combatUpdate.enemyHpMax ?? 10)
+              ),
+              intent: combatUpdate.enemyIntent ?? "",
+              note: "",
+            },
+          ];
+
+    const initiativeInput = Array.isArray(combatUpdate.initiative)
+      ? combatUpdate.initiative
+      : [];
+
+    const initiative = initiativeInput
+      .map((entry) => {
+        if (!entry?.name) return null;
+        return {
+          id: entry.id ?? `init_${crypto.randomUUID()}`,
+          name: entry.name,
+          kind: entry.kind === "enemy" ? "enemy" : "pc",
+          initiative: Number(entry.initiative ?? 0),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.initiative - a.initiative);
+
+    if (initiative.length > 0 && game.pc?.name) {
+      const hasPc = initiative.some((entry) => entry.kind === "pc");
+      if (!hasPc) {
+        initiative.push({
+          id: `init_${crypto.randomUUID()}`,
+          name: game.pc.name,
+          kind: "pc",
+          initiative: 0,
+        });
+        initiative.sort((a, b) => b.initiative - a.initiative);
+      }
+    }
+
     game.combat = {
-      enemyName: combatUpdate.enemyName ?? "Unknown threat",
-      enemyHp,
-      enemyHpMax,
-      enemyIntent: combatUpdate.enemyIntent ?? "",
       round: Number(combatUpdate.round ?? 1),
+      currentTurnId: combatUpdate.currentTurnId ?? initiative[0]?.id ?? null,
+      enemies,
+      initiative,
     };
     game.phase = "combat";
-    addLog(game, `Combat begins with ${game.combat.enemyName}.`, "combat");
+    const enemyNames = enemies.map((enemy) => enemy.name).join(", ");
+    addLog(game, `Combat begins with ${enemyNames}.`, "combat");
   }
 }
 
@@ -295,11 +373,35 @@ const updateStateSchema = z.object({
   combat: z
     .object({
       active: z.boolean(),
+      round: z.number().int().optional(),
+      currentTurnId: z.string().optional(),
       enemyName: z.string().optional(),
       enemyHp: z.number().int().optional(),
       enemyHpMax: z.number().int().optional(),
       enemyIntent: z.string().optional(),
-      round: z.number().int().optional(),
+      enemies: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            name: z.string(),
+            hp: z.number().int().optional(),
+            hpMax: z.number().int().optional(),
+            status: z.string().optional(),
+            intent: z.string().optional(),
+            note: z.string().optional(),
+          })
+        )
+        .optional(),
+      initiative: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            name: z.string(),
+            kind: z.enum(["pc", "enemy"]).optional(),
+            initiative: z.number().int().optional(),
+          })
+        )
+        .optional(),
     })
     .optional(),
   logEntry: z.string().optional(),

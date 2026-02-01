@@ -40,11 +40,23 @@ type InventoryItem = {
 };
 
 type CombatState = {
-  enemyName: string;
-  enemyHp: number;
-  enemyHpMax: number;
-  enemyIntent?: string;
   round?: number;
+  currentTurnId?: string | null;
+  enemies?: Array<{
+    id?: string;
+    name: string;
+    hp?: number;
+    hpMax?: number;
+    status?: EnemySeverity | string;
+    intent?: string;
+    note?: string;
+  }>;
+  initiative?: Array<{
+    id?: string;
+    name: string;
+    kind?: "pc" | "enemy";
+    initiative?: number;
+  }>;
 };
 
 type GameState = {
@@ -89,6 +101,13 @@ type Enemy = {
   name: string;
   severity: EnemySeverity;
   note?: string;
+};
+
+type InitiativeEntry = {
+  id: string;
+  name: string;
+  kind: "pc" | "enemy";
+  initiative: number;
 };
 
 type GameMode = "explore" | "combat";
@@ -268,6 +287,21 @@ function getSeverityFromPercent(percent: number): EnemySeverity {
   return "Unhurt";
 }
 
+function normalizeEnemySeverity(
+  status?: string,
+  hp?: number,
+  hpMax?: number
+): EnemySeverity {
+  if (status && status in severityTone) {
+    return status as EnemySeverity;
+  }
+  const safeMax = Number.isFinite(hpMax) && hpMax ? hpMax : 0;
+  const safeHp = Number.isFinite(hp) ? hp : 0;
+  if (!safeMax) return "Unhurt";
+  const percent = Math.round((safeHp / safeMax) * 100);
+  return getSeverityFromPercent(percent);
+}
+
 export function App() {
   const toolOutput = useToolOutput();
   const game = useMemo(() => {
@@ -284,7 +318,7 @@ export function App() {
           <CardContent className="py-8 text-center">
             <p className="text-sm text-muted-foreground">Waiting for game state.</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Ask ChatGPT to start the adventure, then the widget will update automatically.
+              The widget will update automatically based on the conversation with ChatGPT.
             </p>
           </CardContent>
         </Card>
@@ -310,20 +344,27 @@ export function App() {
     CHA: game.stats?.cha,
   };
 
-  const enemies: Enemy[] = game.combat
-    ? [
-        {
-          id: "enemy-1",
-          name: game.combat.enemyName || "Unknown foe",
-          severity: getSeverityFromPercent(
-            game.combat.enemyHpMax > 0
-              ? Math.round((game.combat.enemyHp / game.combat.enemyHpMax) * 100)
-              : 0
-          ),
-          note: game.combat.enemyIntent,
-        },
-      ]
-    : [];
+  const enemies: Enemy[] = (game.combat?.enemies ?? [])
+    .filter((enemy) => enemy?.name)
+    .map((enemy) => ({
+      id: enemy.id ?? `enemy_${enemy.name}`,
+      name: enemy.name,
+      severity: normalizeEnemySeverity(enemy.status, enemy.hp, enemy.hpMax),
+      note: enemy.note ?? enemy.intent ?? "",
+    }));
+
+  const initiative: InitiativeEntry[] = (game.combat?.initiative ?? [])
+    .filter((entry) => entry?.name)
+    .map((entry) => ({
+      id: entry.id ?? `init_${entry.name}`,
+      name: entry.name,
+      kind: entry.kind === "enemy" ? "enemy" : "pc",
+      initiative: Number(entry.initiative ?? 0),
+    }))
+    .sort((a, b) => b.initiative - a.initiative);
+
+  const currentTurnId =
+    game.combat?.currentTurnId ?? (initiative[0]?.id ?? null);
 
   const statusChip =
     mode === "combat"
@@ -441,9 +482,27 @@ export function App() {
               defaultOpen
             >
               <div className="space-y-2">
-                <div className="rounded-2xl border p-3 text-sm text-muted-foreground">
-                  Initiative order will appear here.
-                </div>
+                {initiative.length === 0 ? (
+                  <div className="rounded-2xl border p-3 text-sm text-muted-foreground">
+                    Initiative order will appear here.
+                  </div>
+                ) : (
+                  initiative.map((entry, idx) => (
+                    <div
+                      key={entry.id}
+                      className={`flex items-center justify-between gap-3 rounded-2xl border p-3 ${
+                        entry.id === currentTurnId ? "ring-2 ring-inset ring-ring" : ""
+                      }`}
+                    >
+                      <p className="truncate text-sm font-semibold">
+                        {idx + 1}. {entry.name}
+                      </p>
+                      <Badge variant="outline" className="rounded-full tabular-nums">
+                        {entry.initiative}
+                      </Badge>
+                    </div>
+                  ))
+                )}
               </div>
             </AccordionSection>
 
