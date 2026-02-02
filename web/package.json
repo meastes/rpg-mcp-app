@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:css": "tailwindcss -i ./src/main.css -o ./dist/tailwind.css --minify",
+    "build:css": "TAILWIND_DISABLE_WATCHER=1 tailwindcss -i ./src/main.css -o ./dist/tailwind.css --minify",
     "build:js": "esbuild ./src/main.tsx --bundle --format=esm --tsconfig=./tsconfig.json --alias:@=./src --outfile=./dist/widget.js",
     "build:widget": "node ./scripts/build-widget.mjs",
     "build": "npm run build:css && npm run build:js && npm run build:widget",
