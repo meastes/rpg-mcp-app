@@ -1,0 +1,12 @@
+{
+  "name": "rpg-mcp-app",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm --workspace web run build"
+  }
+}
