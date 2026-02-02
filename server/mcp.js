@@ -728,6 +728,16 @@ export async function handleMcpRequest(req, res) {
     return;
   }
 
+  if (req.method === "GET") {
+    const hasSessionId = Boolean(req.headers["mcp-session-id"]);
+    const accept = String(req.headers.accept ?? "");
+    const wantsJson = accept.includes("application/json");
+    if (!hasSessionId && !wantsJson) {
+      res.writeHead(200, { "content-type": "text/plain" }).end("TTRPG MCP server");
+      return;
+    }
+  }
+
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
