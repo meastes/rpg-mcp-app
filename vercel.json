@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install --include=optional",
   "buildCommand": "npm run build",
   "rewrites": [
     { "source": "/mcp", "destination": "/api/mcp" }
