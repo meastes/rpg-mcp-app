@@ -446,9 +446,7 @@ const resetGameSchema = z.object({
   gameId: z.string(),
 });
 
-export function createRpgServer() {
-  const server = new McpServer({ name: "ttrpg-mcp", version: "0.1.0" });
-
+export function registerRpgTools(server) {
   server.registerResource(
     "rpg-widget",
     TOOL_OUTPUT_TEMPLATE,
@@ -717,6 +715,11 @@ export function createRpgServer() {
     }
   );
 
+}
+
+export function createRpgServer() {
+  const server = new McpServer({ name: "ttrpg-mcp", version: "0.1.0" });
+  registerRpgTools(server);
   return server;
 }
 

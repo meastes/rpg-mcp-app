@@ -24,3 +24,8 @@ web/dist/
 
 # MCP inspector
 .mcp-inspector/
+
+# Next.js
+.next/
+.next-env.d.ts
+next-env.d.ts
