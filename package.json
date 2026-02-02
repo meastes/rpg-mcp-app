@@ -19,6 +19,7 @@
   },
   "scripts": {
     "build": "npm --workspace web run build && next build",
+    "postinstall": "if [ \"$VERCEL\" = \"1\" ]; then npm i @parcel/watcher-linux-x64-glibc --no-save || true; fi",
     "dev": "next dev",
     "start": "next start"
   }
