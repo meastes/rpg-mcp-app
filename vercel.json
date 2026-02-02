@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
+  "outputDirectory": "web/dist",
   "functions": {
     "api/mcp.js": {
       "runtime": "nodejs20.x",
