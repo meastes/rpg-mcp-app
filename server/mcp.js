@@ -10,8 +10,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const widgetPath = path.join(__dirname, "../web/dist/widget.html");
 
-const widgetHtml = readFileSync(widgetPath, "utf8");
-
 const TOOL_OUTPUT_TEMPLATE = "ui://widget/rpg.html";
 const commonToolMeta = {
   "openai/outputTemplate": TOOL_OUTPUT_TEMPLATE,
@@ -456,7 +454,14 @@ export function registerRpgTools(server) {
         {
           uri: TOOL_OUTPUT_TEMPLATE,
           mimeType: "text/html+skybridge",
-          text: widgetHtml,
+          text: (() => {
+            try {
+              return readFileSync(widgetPath, "utf8");
+            } catch (error) {
+              console.error("Failed to load widget HTML:", error);
+              return "<p>Widget UI missing. Rebuild web/dist/widget.html.</p>";
+            }
+          })(),
           _meta: { "openai/widgetPrefersBorder": true },
         },
       ],
