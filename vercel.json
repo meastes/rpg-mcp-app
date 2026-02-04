@@ -1,8 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm ci && npm install --no-save @parcel/watcher-linux-x64-glibc lightningcss-linux-x64-gnu @tailwindcss/oxide-linux-x64-gnu",
-  "buildCommand": "npm run build",
-  "rewrites": [
-    { "source": "/mcp", "destination": "/api/mcp" }
-  ]
+  "buildCommand": "npm run build"
 }
