@@ -9,7 +9,6 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const widgetPath = path.join(process.cwd(), "web/dist/widget.html");
-const widgetFallbackPath = path.join(__dirname, "../web/dist/widget.html");
 
 const TOOL_OUTPUT_TEMPLATE = "ui://widget/rpg.html";
 const commonToolMeta = {
@@ -459,13 +458,8 @@ export function registerRpgTools(server) {
             try {
               return readFileSync(widgetPath, "utf8");
             } catch (error) {
-              try {
-                return readFileSync(widgetFallbackPath, "utf8");
-              } catch (fallbackError) {
-                console.error("Failed to load widget HTML:", error);
-                console.error("Fallback widget load failed:", fallbackError);
-                return "<p>Widget UI missing. Rebuild web/dist/widget.html.</p>";
-              }
+              console.error("Failed to load widget HTML:", error);
+              return "<p>Widget UI missing. Rebuild web/dist/widget.html.</p>";
             }
           })(),
           _meta: { "openai/widgetPrefersBorder": true },

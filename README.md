@@ -39,6 +39,7 @@ Server runs at `http://localhost:8787/mcp` by default.
 2. Deploy with the default settings (the repo includes `vercel.json`).
 3. Use the deployed MCP endpoint: `https://<project>.vercel.app/mcp`.
 4. The MCP handler is implemented as a Next.js route at `app/api/[transport]/route.js`.
+5. Ensure `web/dist/widget.html` is built (via `npm run build`) since the MCP widget is loaded from that file.
 
 ## Local development tips
 
