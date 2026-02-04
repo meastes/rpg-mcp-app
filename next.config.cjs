@@ -2,6 +2,7 @@
 const nextConfig = {
   outputFileTracingIncludes: {
     "/api/*": ["web/dist/**"],
+    "/mcp": ["web/dist/**"],
   },
 };
 
