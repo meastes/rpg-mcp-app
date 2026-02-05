@@ -14,6 +14,7 @@ const TOOL_OUTPUT_TEMPLATE = "ui://widget/rpg.html";
 const commonToolMeta = {
   "openai/outputTemplate": TOOL_OUTPUT_TEMPLATE,
 };
+const GAME_GUIDE_RESOURCE = "rpg://guide";
 
 const games = new Map();
 
@@ -467,6 +468,49 @@ export function registerRpgTools(server) {
       ],
     })
   );
+  server.registerResource("rpg-guide", GAME_GUIDE_RESOURCE, {}, async () => ({
+    contents: [
+      {
+        uri: GAME_GUIDE_RESOURCE,
+        mimeType: "text/plain",
+        text:
+          "TTRPG Game Guide (general, system-agnostic)\n" +
+          "\n" +
+          "Core loop:\n" +
+          "- Present a scene and a clear choice.\n" +
+          "- Ask for intent and approach.\n" +
+          "- Resolve with a roll when failure is interesting or time matters.\n" +
+          "- Describe the outcome and update state.\n" +
+          "\n" +
+          "Running a session:\n" +
+          "- Start with a hook, a goal, and a constraint.\n" +
+          "- Track stakes: what happens on success, partial, or failure.\n" +
+          "- Keep the pace by alternating spotlight between players.\n" +
+          "- Use short, concrete descriptions; ask questions to fill in details.\n" +
+          "\n" +
+          "Encounters:\n" +
+          "- Make enemies intelligible: name, intent, and a tell.\n" +
+          "- Use the environment (cover, hazards, objectives) to vary tactics.\n" +
+          "- End fights when the story shifts: surrender, retreat, or twist.\n" +
+          "\n" +
+          "Stats & leveling (D&D 5e style, not enforced):\n" +
+          "- Starting stats: standard array 15,14,13,12,10,8 or 27-point buy (8-15 pre-bonuses).\n" +
+          "- Primary stat: aim for 14-16 after ancestry/background bonuses.\n" +
+          "- Ability increases at levels 4,8,12,16,19: +2 one stat or +1/+1, max 20.\n" +
+          "- Optional: proficiency bonus +2 at level 1; +3 at 5; +4 at 9; +5 at 13; +6 at 17.\n" +
+          "\n" +
+          "Rewards and progression:\n" +
+          "- Reward what you want to see: risk, creativity, teamwork.\n" +
+          "- Give tangible progress: clues, allies, reputation, or gear.\n" +
+          "\n" +
+          "Safety and consent:\n" +
+          "- Confirm boundaries; allow players to skip content without explanation.\n" +
+          "- Keep a quick stop/slow/swap option available.\n" +
+          "\n" +
+          "Remember: these are guidelines. Adjust to fit your table.",
+      },
+    ],
+  }));
 
   server.registerTool(
     "start_game",
