@@ -316,7 +316,8 @@ export function App() {
   }
 
   const inventory = game.inventory ?? [];
-  const mode: GameMode = game.phase === "combat" ? "combat" : "explore";
+  const mode: GameMode =
+    game.phase === "combat" || Boolean(game.combat) ? "combat" : "explore";
   const characterName = game.pc?.name ?? "Unnamed hero";
 
   const hpMax = game.hp?.max ?? 0;

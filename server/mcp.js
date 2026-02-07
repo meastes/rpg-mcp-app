@@ -415,63 +415,83 @@ function applyCombatUpdate(game, combatUpdate) {
   }
 
   if (combatUpdate.active === true) {
-    const enemiesInput = Array.isArray(combatUpdate.enemies)
-      ? combatUpdate.enemies
+    const wasInCombat = game.phase === "combat" && game.combat;
+    const existingCombat = game.combat ?? {};
+
+    const hasExplicitEnemies = Array.isArray(combatUpdate.enemies);
+    const hasSingleEnemyFields =
+      combatUpdate.enemyName !== undefined ||
+      combatUpdate.enemyHp !== undefined ||
+      combatUpdate.enemyHpMax !== undefined ||
+      combatUpdate.enemyIntent !== undefined;
+
+    let enemies = Array.isArray(existingCombat.enemies)
+      ? [...existingCombat.enemies]
       : [];
 
-    const enemies =
-      enemiesInput.length > 0
-        ? enemiesInput
-            .map((enemy) => {
-              if (!enemy?.name) return null;
-              const hpMax = clamp(Number(enemy.hpMax ?? 10), 1, 999);
-              const hp = clamp(Number(enemy.hp ?? hpMax), 0, hpMax);
-              return {
-                id: enemy.id ?? `enemy_${crypto.randomUUID()}`,
-                name: enemy.name,
-                hp,
-                hpMax,
-                status: enemy.status ?? getEnemyStatus(hp, hpMax),
-                intent: enemy.intent ?? "",
-                note: enemy.note ?? "",
-              };
-            })
-            .filter(Boolean)
-        : [
-            {
-              id: `enemy_${crypto.randomUUID()}`,
-              name: combatUpdate.enemyName ?? "Unknown threat",
-              hp: clamp(
-                Number(combatUpdate.enemyHp ?? combatUpdate.enemyHpMax ?? 10),
-                0,
-                clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999)
-              ),
-              hpMax: clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999),
-              status: getEnemyStatus(
-                Number(combatUpdate.enemyHp ?? combatUpdate.enemyHpMax ?? 10),
-                Number(combatUpdate.enemyHpMax ?? 10)
-              ),
-              intent: combatUpdate.enemyIntent ?? "",
-              note: "",
-            },
-          ];
+    if (hasExplicitEnemies) {
+      enemies = combatUpdate.enemies
+        .map((enemy) => {
+          if (!enemy?.name) return null;
+          const hpMax = clamp(Number(enemy.hpMax ?? 10), 1, 999);
+          const hp = clamp(Number(enemy.hp ?? hpMax), 0, hpMax);
+          return {
+            id: enemy.id ?? `enemy_${crypto.randomUUID()}`,
+            name: enemy.name,
+            hp,
+            hpMax,
+            status: enemy.status ?? getEnemyStatus(hp, hpMax),
+            intent: enemy.intent ?? "",
+            note: enemy.note ?? "",
+          };
+        })
+        .filter(Boolean);
+    } else if (hasSingleEnemyFields) {
+      const hpMax = clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999);
+      const hp = clamp(Number(combatUpdate.enemyHp ?? hpMax), 0, hpMax);
+      enemies = [
+        {
+          id: `enemy_${crypto.randomUUID()}`,
+          name: combatUpdate.enemyName ?? "Unknown threat",
+          hp,
+          hpMax,
+          status: getEnemyStatus(hp, hpMax),
+          intent: combatUpdate.enemyIntent ?? "",
+          note: "",
+        },
+      ];
+    } else if (enemies.length === 0) {
+      enemies = [
+        {
+          id: `enemy_${crypto.randomUUID()}`,
+          name: "Unknown threat",
+          hp: 10,
+          hpMax: 10,
+          status: "Unhurt",
+          intent: "",
+          note: "",
+        },
+      ];
+    }
 
-    const initiativeInput = Array.isArray(combatUpdate.initiative)
-      ? combatUpdate.initiative
+    const hasExplicitInitiative = Array.isArray(combatUpdate.initiative);
+    let initiative = Array.isArray(existingCombat.initiative)
+      ? [...existingCombat.initiative]
       : [];
-
-    const initiative = initiativeInput
-      .map((entry) => {
-        if (!entry?.name) return null;
-        return {
-          id: entry.id ?? `init_${crypto.randomUUID()}`,
-          name: entry.name,
-          kind: entry.kind === "enemy" ? "enemy" : "pc",
-          initiative: Number(entry.initiative ?? 0),
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.initiative - a.initiative);
+    if (hasExplicitInitiative) {
+      initiative = combatUpdate.initiative
+        .map((entry) => {
+          if (!entry?.name) return null;
+          return {
+            id: entry.id ?? `init_${crypto.randomUUID()}`,
+            name: entry.name,
+            kind: entry.kind === "enemy" ? "enemy" : "pc",
+            initiative: Number(entry.initiative ?? 0),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.initiative - a.initiative);
+    }
 
     if (initiative.length > 0 && game.pc?.name) {
       const hasPc = initiative.some((entry) => entry.kind === "pc");
@@ -486,15 +506,29 @@ function applyCombatUpdate(game, combatUpdate) {
       }
     }
 
+    let currentTurnId = combatUpdate.currentTurnId;
+    if (!currentTurnId) {
+      const previousCurrentTurnId = existingCombat.currentTurnId ?? null;
+      const previousTurnStillExists = initiative.some(
+        (entry) => entry.id === previousCurrentTurnId
+      );
+      currentTurnId = previousTurnStillExists
+        ? previousCurrentTurnId
+        : initiative[0]?.id ?? null;
+    }
+
     game.combat = {
-      round: Number(combatUpdate.round ?? 1),
-      currentTurnId: combatUpdate.currentTurnId ?? initiative[0]?.id ?? null,
+      round: Number(combatUpdate.round ?? existingCombat.round ?? 1),
+      currentTurnId,
       enemies,
       initiative,
     };
     game.phase = "combat";
-    const enemyNames = enemies.map((enemy) => enemy.name).join(", ");
-    addLog(game, `Combat begins with ${enemyNames}.`, "combat");
+
+    if (!wasInCombat) {
+      const enemyNames = enemies.map((enemy) => enemy.name).join(", ");
+      addLog(game, `Combat begins with ${enemyNames}.`, "combat");
+    }
   }
 }
 
