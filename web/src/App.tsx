@@ -312,18 +312,7 @@ export function App() {
   }, [toolOutput]);
 
   if (!game) {
-    return (
-      <div className="mx-auto w-full max-w-[440px] p-3 sm:p-4">
-        <Card className="rounded-2xl shadow-sm">
-          <CardContent className="py-8 text-center">
-            <p className="text-sm text-muted-foreground">Waiting for game state.</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              The widget will update automatically based on the conversation with ChatGPT.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return null;
   }
 
   const inventory = game.inventory ?? [];

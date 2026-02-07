@@ -15,8 +15,55 @@ const commonToolMeta = {
   "openai/outputTemplate": TOOL_OUTPUT_TEMPLATE,
 };
 const GAME_GUIDE_RESOURCE = "rpg://guide";
+const SETUP_SESSION_TTL_MS = 30 * 60 * 1000;
+const REQUIRED_SETUP_CHOICES = ["genre", "pc.name", "pc.archetype"];
+const GAME_GUIDE_SUMMARY =
+  "Read the guide, pick genre/tone and core character details, then confirm setup before starting.";
+const DEFAULT_GENRES = [
+  "Heroic Fantasy",
+  "Sword and Sorcery",
+  "Grimdark Frontier",
+];
+const DEFAULT_TONES = ["Adventurous", "Mystic", "Gritty"];
+const DEFAULT_ARCHETYPES = ["Ranger", "Warrior", "Mage", "Rogue", "Cleric"];
+const DEFAULT_PC_NAMES = ["Rowan", "Kestrel", "Iris", "Thorn", "Ash"];
+const GAME_GUIDE_TEXT = `TTRPG Game Guide (general, system-agnostic)
+
+Core loop:
+- Present a scene and a clear choice.
+- Ask for intent and approach.
+- Resolve with a roll when failure is interesting or time matters.
+- Describe the outcome and update state.
+
+Running a session:
+- Start with a hook, a goal, and a constraint.
+- Track stakes: what happens on success, partial, or failure.
+- Keep the pace by alternating spotlight between players.
+- Use short, concrete descriptions; ask questions to fill in details.
+
+Encounters:
+- Make enemies intelligible: name, intent, and a tell.
+- Use the environment (cover, hazards, objectives) to vary tactics.
+- End fights when the story shifts: surrender, retreat, or twist.
+
+Stats & leveling (D&D 5e style, not enforced):
+- Starting stats: standard array 15,14,13,12,10,8 or 27-point buy (8-15 pre-bonuses).
+- Primary stat: aim for 14-16 after ancestry/background bonuses.
+- Ability increases at levels 4,8,12,16,19: +2 one stat or +1/+1, max 20.
+- Optional: proficiency bonus +2 at level 1; +3 at 5; +4 at 9; +5 at 13; +6 at 17.
+
+Rewards and progression:
+- Reward what you want to see: risk, creativity, teamwork.
+- Give tangible progress: clues, allies, reputation, or gear.
+
+Safety and consent:
+- Confirm boundaries; allow players to skip content without explanation.
+- Keep a quick stop/slow/swap option available.
+
+Remember: these are guidelines. Adjust to fit your table.`;
 
 const games = new Map();
+const setupSessions = new Map();
 
 const baseStats = { str: 2, agi: 2, int: 2, cha: 2 };
 
@@ -26,6 +73,127 @@ function clamp(value, min, max) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function purgeExpiredSetupSessions() {
+  const now = Date.now();
+  for (const [setupId, entry] of setupSessions.entries()) {
+    if (!entry || entry.expiresAt <= now) {
+      setupSessions.delete(setupId);
+    }
+  }
+}
+
+function mergeSetupArgs(base = {}, patch = {}) {
+  return {
+    ...base,
+    ...patch,
+    pc: {
+      ...(base.pc ?? {}),
+      ...(patch.pc ?? {}),
+    },
+  };
+}
+
+function pickRandom(list, fallback) {
+  if (!Array.isArray(list) || list.length === 0) return fallback;
+  const index = crypto.randomInt(0, list.length);
+  return list[index];
+}
+
+function applySetupDefaults(args = {}) {
+  const merged = mergeSetupArgs({}, args);
+  if (!merged.genre) merged.genre = pickRandom(DEFAULT_GENRES, "Heroic Fantasy");
+  if (!merged.tone) merged.tone = pickRandom(DEFAULT_TONES, "Adventurous");
+  merged.pc = merged.pc ?? {};
+  if (!merged.pc.name) merged.pc.name = pickRandom(DEFAULT_PC_NAMES, "Traveler");
+  if (!merged.pc.archetype) {
+    merged.pc.archetype = pickRandom(DEFAULT_ARCHETYPES, "Ranger");
+  }
+  return merged;
+}
+
+function missingSetupChoices(args = {}) {
+  const missing = [];
+  if (!args.genre) missing.push("genre");
+  if (!args.pc?.name) missing.push("pc.name");
+  if (!args.pc?.archetype) missing.push("pc.archetype");
+  return missing;
+}
+
+function beginSetupSession(gameId, startArgs = {}) {
+  purgeExpiredSetupSessions();
+  const setupId = `setup_${crypto.randomUUID()}`;
+  setupSessions.set(setupId, {
+    setupId,
+    gameId,
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + SETUP_SESSION_TTL_MS,
+    confirmed: false,
+    startArgs: startArgs ?? {},
+  });
+  return setupSessions.get(setupId);
+}
+
+function getSetupSession(setupId) {
+  purgeExpiredSetupSessions();
+  if (!setupId) return null;
+  return setupSessions.get(setupId) ?? null;
+}
+
+function confirmSetupSession(setupId, patchArgs = {}) {
+  const session = getSetupSession(setupId);
+  if (!session) {
+    return {
+      ok: false,
+      message:
+        "Setup session not found or expired. Call begin_setup to start again.",
+    };
+  }
+
+  session.startArgs = mergeSetupArgs(session.startArgs, patchArgs);
+  const missing = missingSetupChoices(session.startArgs);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message:
+        `Setup still needs ${missing.join(", ")}.`,
+      missingChoices: missing,
+      session,
+    };
+  }
+
+  session.confirmed = true;
+  session.confirmedAt = Date.now();
+  return { ok: true, session };
+}
+
+function consumeConfirmedSetupSession(setupId, requestedGameId) {
+  const session = getSetupSession(setupId);
+  if (!session) {
+    return {
+      ok: false,
+      message:
+        "Setup session not found or expired. Call begin_setup and confirm_setup again.",
+    };
+  }
+
+  if (requestedGameId && session.gameId !== requestedGameId) {
+    return {
+      ok: false,
+      message: "setupId does not match gameId. Use the gameId returned by begin_setup.",
+    };
+  }
+
+  if (!session.confirmed) {
+    return {
+      ok: false,
+      message: "Setup is not confirmed. Call confirm_setup before start_game.",
+    };
+  }
+
+  setupSessions.delete(setupId);
+  return { ok: true, gameId: session.gameId, startArgs: session.startArgs };
 }
 
 function createGameState(overrides = {}) {
@@ -330,7 +498,7 @@ function applyCombatUpdate(game, combatUpdate) {
   }
 }
 
-const startGameSchema = z.object({
+const setupPreferencesSchema = z.object({
   gameId: z.string().optional(),
   genre: z.string().optional(),
   tone: z.string().optional(),
@@ -359,6 +527,22 @@ const startGameSchema = z.object({
       goal: z.string().optional(),
     })
     .optional(),
+});
+
+const beginSetupSchema = setupPreferencesSchema;
+
+const confirmSetupSchema = setupPreferencesSchema
+  .omit({ gameId: true })
+  .extend({
+    setupId: z.string(),
+  });
+
+const startGameSchema = setupPreferencesSchema.extend({
+  setupId: z.string().optional(),
+});
+
+const newSessionSchema = setupPreferencesSchema.extend({
+  mode: z.enum(["auto", "guided"]).optional(),
 });
 
 const getStateSchema = z.object({
@@ -473,135 +657,307 @@ export function registerRpgTools(server) {
       {
         uri: GAME_GUIDE_RESOURCE,
         mimeType: "text/plain",
-        text:
-          "TTRPG Game Guide (general, system-agnostic)\n" +
-          "\n" +
-          "Core loop:\n" +
-          "- Present a scene and a clear choice.\n" +
-          "- Ask for intent and approach.\n" +
-          "- Resolve with a roll when failure is interesting or time matters.\n" +
-          "- Describe the outcome and update state.\n" +
-          "\n" +
-          "Running a session:\n" +
-          "- Start with a hook, a goal, and a constraint.\n" +
-          "- Track stakes: what happens on success, partial, or failure.\n" +
-          "- Keep the pace by alternating spotlight between players.\n" +
-          "- Use short, concrete descriptions; ask questions to fill in details.\n" +
-          "\n" +
-          "Encounters:\n" +
-          "- Make enemies intelligible: name, intent, and a tell.\n" +
-          "- Use the environment (cover, hazards, objectives) to vary tactics.\n" +
-          "- End fights when the story shifts: surrender, retreat, or twist.\n" +
-          "\n" +
-          "Stats & leveling (D&D 5e style, not enforced):\n" +
-          "- Starting stats: standard array 15,14,13,12,10,8 or 27-point buy (8-15 pre-bonuses).\n" +
-          "- Primary stat: aim for 14-16 after ancestry/background bonuses.\n" +
-          "- Ability increases at levels 4,8,12,16,19: +2 one stat or +1/+1, max 20.\n" +
-          "- Optional: proficiency bonus +2 at level 1; +3 at 5; +4 at 9; +5 at 13; +6 at 17.\n" +
-          "\n" +
-          "Rewards and progression:\n" +
-          "- Reward what you want to see: risk, creativity, teamwork.\n" +
-          "- Give tangible progress: clues, allies, reputation, or gear.\n" +
-          "\n" +
-          "Safety and consent:\n" +
-          "- Confirm boundaries; allow players to skip content without explanation.\n" +
-          "- Keep a quick stop/slow/swap option available.\n" +
-          "\n" +
-          "Remember: these are guidelines. Adjust to fit your table.",
+        text: GAME_GUIDE_TEXT,
       },
     ],
   }));
 
+  const stripSetupControlFields = (args = {}) => {
+    const { gameId, setupId, mode, ...rest } = args;
+    return rest;
+  };
+
+  const formatSetupContent = (session, phase) => {
+    const missingChoices = missingSetupChoices(session.startArgs);
+    return {
+      type: "ttrpg_setup",
+      phase,
+      setupId: session.setupId,
+      gameId: session.gameId,
+      guideResourceUri: GAME_GUIDE_RESOURCE,
+      guideSummary: GAME_GUIDE_SUMMARY,
+      guide: GAME_GUIDE_TEXT,
+      requiredChoices: REQUIRED_SETUP_CHOICES,
+      missingChoices,
+      providedChoices: {
+        genre: session.startArgs.genre ?? "",
+        tone: session.startArgs.tone ?? "",
+        pc: session.startArgs.pc ?? {},
+      },
+      nextTool: missingChoices.length ? "confirm_setup" : "start_game",
+      startGameArgsTemplate: missingChoices.length
+        ? null
+        : {
+            ...session.startArgs,
+            gameId: session.gameId,
+            setupId: session.setupId,
+          },
+    };
+  };
+
+  const runStartGame = (args) => {
+    const requestedGameId = args?.gameId?.trim();
+    let existing = getGame(requestedGameId);
+    let effectiveGameId = requestedGameId;
+    let setupDefaults = {};
+
+    if (!existing) {
+      if (!args?.setupId) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                "This looks like a new game. Call new_session first. " +
+                "It can auto-generate setup and start immediately.",
+            },
+          ],
+          structuredContent: {
+            type: "ttrpg_setup_required",
+            nextTool: "new_session",
+            suggestedArgs: { mode: "auto" },
+          },
+        };
+      }
+
+      const setupResult = consumeConfirmedSetupSession(args.setupId, requestedGameId);
+      if (!setupResult.ok) {
+        return replyWithError(setupResult.message);
+      }
+      effectiveGameId = setupResult.gameId;
+      setupDefaults = setupResult.startArgs ?? {};
+      existing = getGame(effectiveGameId);
+    }
+
+    const startArgs = mergeSetupArgs(setupDefaults, args ?? {});
+    startArgs.gameId = effectiveGameId;
+    const game = existing ?? createGameState({ gameId: effectiveGameId });
+
+    if (startArgs.genre !== undefined) game.genre = startArgs.genre.trim();
+    if (startArgs.tone !== undefined) game.tone = startArgs.tone.trim();
+    if (startArgs.startingLocation !== undefined) {
+      game.location = startArgs.startingLocation.trim();
+    }
+    if (startArgs.pc) {
+      game.pc = { ...game.pc, ...startArgs.pc };
+    }
+    if (startArgs.storyElements !== undefined) {
+      game.storyElements = normalizeStoryElements(startArgs.storyElements);
+    }
+    if (startArgs.startingInventory !== undefined) {
+      game.inventory = startArgs.startingInventory
+        .filter((item) => item?.name)
+        .map((item) => ({
+          id: `item_${crypto.randomUUID()}`,
+          name: item.name,
+          qty: clamp(Number(item.qty ?? 1), 1, 999),
+          notes: item.notes ?? "",
+        }));
+    }
+
+    const desiredHpMax = startArgs.hpMax ?? game.hp.max;
+    const desiredMpMax = startArgs.mpMax ?? game.mp.max;
+
+    game.hp.max = clamp(Number(desiredHpMax), 1, 999);
+    game.mp.max = clamp(Number(desiredMpMax), 0, 999);
+
+    const shouldResetVitals = !existing || game.phase === "setup";
+    if (shouldResetVitals) {
+      const startingHp =
+        startArgs.startingHp !== undefined ? Number(startArgs.startingHp) : game.hp.max;
+      const startingMp =
+        startArgs.startingMp !== undefined ? Number(startArgs.startingMp) : game.mp.max;
+      game.hp.current = clamp(startingHp, 0, game.hp.max);
+      game.mp.current = clamp(startingMp, 0, game.mp.max);
+    } else {
+      if (startArgs.startingHp !== undefined) {
+        game.hp.current = clamp(Number(startArgs.startingHp), 0, game.hp.max);
+      } else {
+        game.hp.current = clamp(game.hp.current, 0, game.hp.max);
+      }
+      if (startArgs.startingMp !== undefined) {
+        game.mp.current = clamp(Number(startArgs.startingMp), 0, game.mp.max);
+      } else {
+        game.mp.current = clamp(game.mp.current, 0, game.mp.max);
+      }
+    }
+
+    if (!existing && startArgs.statFocus) {
+      game.stats = withStatFocus(game.stats, startArgs.statFocus);
+    }
+
+    const missing = missingSetupChoices({ genre: game.genre, pc: game.pc });
+    game.setupComplete = missing.length === 0;
+    game.phase = game.setupComplete ? "exploration" : "setup";
+
+    if (game.setupComplete && !game.location) {
+      game.location = "Unknown frontier";
+    }
+
+    persistGame(game);
+
+    const message = game.setupComplete
+      ? `Game ready. ${game.pc.name} enters the story.`
+      : `Setup needs ${missing.join(", ")}.`;
+
+    return replyWithState(game, message);
+  };
+
+  server.registerTool(
+    "new_session",
+    {
+      title: "Start new adventure",
+      description:
+        "Primary entry point for new games. " +
+        "Use mode=auto to generate defaults and start immediately, or mode=guided to review setup first.",
+      inputSchema: newSessionSchema,
+      annotations: {
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: false,
+      },
+      _meta: {
+        ...commonToolMeta,
+        "openai/toolInvocation/invoking": "Starting new session",
+        "openai/toolInvocation/invoked": "Session flow updated",
+      },
+    },
+    async (args) => {
+      const mode = args?.mode === "guided" ? "guided" : "auto";
+      const gameId = args?.gameId?.trim() || `game_${crypto.randomUUID()}`;
+      const rawSetupArgs = stripSetupControlFields(args ?? {});
+      const setupArgs = mode === "auto" ? applySetupDefaults(rawSetupArgs) : rawSetupArgs;
+      const session = beginSetupSession(gameId, setupArgs);
+      const missingChoices = missingSetupChoices(session.startArgs);
+
+      if (mode === "guided" && missingChoices.length > 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Setup started. Missing ${missingChoices.join(", ")}. ` +
+                "Review the guide and call confirm_setup with the setupId and remaining choices.",
+            },
+          ],
+          structuredContent: formatSetupContent(session, "begin"),
+        };
+      }
+
+      const confirmResult = confirmSetupSession(session.setupId, {});
+      if (!confirmResult.ok) {
+        return replyWithError(confirmResult.message);
+      }
+
+      return runStartGame({
+        ...session.startArgs,
+        gameId: session.gameId,
+        setupId: session.setupId,
+      });
+    }
+  );
+
+  server.registerTool(
+    "begin_setup",
+    {
+      title: "Begin setup (advanced)",
+      description:
+        "Start the setup wizard. Returns guide summary, required choices, and a setupId for confirm_setup.",
+      inputSchema: beginSetupSchema,
+      annotations: {
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: false,
+      },
+      _meta: {
+        "openai/toolInvocation/invoking": "Starting setup wizard",
+        "openai/toolInvocation/invoked": "Setup wizard started",
+      },
+    },
+    async (args) => {
+      const gameId = args?.gameId?.trim() || `game_${crypto.randomUUID()}`;
+      const setupArgs = stripSetupControlFields(args ?? {});
+      const session = beginSetupSession(gameId, setupArgs);
+      const missingChoices = missingSetupChoices(session.startArgs);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              missingChoices.length > 0
+                ? `Setup started. Missing ${missingChoices.join(", ")}. Call confirm_setup next.`
+                : "Setup started with all required choices. Call confirm_setup to finalize.",
+          },
+        ],
+        structuredContent: formatSetupContent(session, "begin"),
+      };
+    }
+  );
+
+  server.registerTool(
+    "confirm_setup",
+    {
+      title: "Confirm setup (advanced)",
+      description:
+        "Confirm setup choices for a setupId. After success, call start_game with setupId and gameId.",
+      inputSchema: confirmSetupSchema,
+      annotations: {
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: false,
+      },
+      _meta: {
+        "openai/toolInvocation/invoking": "Confirming setup",
+        "openai/toolInvocation/invoked": "Setup confirmation updated",
+      },
+    },
+    async (args) => {
+      const { setupId } = args;
+      const setupArgs = stripSetupControlFields(args ?? {});
+      const result = confirmSetupSession(setupId, setupArgs);
+      if (!result.ok) {
+        if (result.session) {
+          return {
+            content: [{ type: "text", text: result.message }],
+            structuredContent: formatSetupContent(result.session, "confirm"),
+          };
+        }
+        return replyWithError(result.message);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "Setup confirmed. Call start_game with setupId and gameId to begin play.",
+          },
+        ],
+        structuredContent: formatSetupContent(result.session, "confirmed"),
+      };
+    }
+  );
+
   server.registerTool(
     "start_game",
     {
-      title: "Start or update game setup",
+      title: "Begin adventure or update setup",
       description:
-        "Create a new game or update the setup details for the current TTRPG session.",
+        "Finalize setup and enter play. Usually call new_session for new games.",
       inputSchema: startGameSchema,
+      annotations: {
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: false,
+      },
       _meta: {
         ...commonToolMeta,
         "openai/toolInvocation/invoking": "Setting up the adventure",
         "openai/toolInvocation/invoked": "Adventure setup updated",
       },
     },
-    async (args) => {
-      const existing = getGame(args?.gameId);
-      const game = existing ?? createGameState({ gameId: args?.gameId });
-
-      if (args?.genre !== undefined) game.genre = args.genre.trim();
-      if (args?.tone !== undefined) game.tone = args.tone.trim();
-      if (args?.startingLocation !== undefined) {
-        game.location = args.startingLocation.trim();
-      }
-      if (args?.pc) {
-        game.pc = { ...game.pc, ...args.pc };
-      }
-      if (args?.storyElements !== undefined) {
-        game.storyElements = normalizeStoryElements(args.storyElements);
-      }
-      if (args?.startingInventory !== undefined) {
-        game.inventory = args.startingInventory
-          .filter((item) => item?.name)
-          .map((item) => ({
-            id: `item_${crypto.randomUUID()}`,
-            name: item.name,
-            qty: clamp(Number(item.qty ?? 1), 1, 999),
-            notes: item.notes ?? "",
-          }));
-      }
-
-      const desiredHpMax = args?.hpMax ?? game.hp.max;
-      const desiredMpMax = args?.mpMax ?? game.mp.max;
-
-      game.hp.max = clamp(Number(desiredHpMax), 1, 999);
-      game.mp.max = clamp(Number(desiredMpMax), 0, 999);
-
-      const shouldResetVitals = !existing || game.phase === "setup";
-      if (shouldResetVitals) {
-        const startingHp =
-          args?.startingHp !== undefined ? Number(args.startingHp) : game.hp.max;
-        const startingMp =
-          args?.startingMp !== undefined ? Number(args.startingMp) : game.mp.max;
-        game.hp.current = clamp(startingHp, 0, game.hp.max);
-        game.mp.current = clamp(startingMp, 0, game.mp.max);
-      } else {
-        if (args?.startingHp !== undefined) {
-          game.hp.current = clamp(Number(args.startingHp), 0, game.hp.max);
-        } else {
-          game.hp.current = clamp(game.hp.current, 0, game.hp.max);
-        }
-        if (args?.startingMp !== undefined) {
-          game.mp.current = clamp(Number(args.startingMp), 0, game.mp.max);
-        } else {
-          game.mp.current = clamp(game.mp.current, 0, game.mp.max);
-        }
-      }
-
-      if (!existing && args?.statFocus) {
-        game.stats = withStatFocus(game.stats, args.statFocus);
-      }
-
-      const missing = [];
-      if (!game.genre) missing.push("genre");
-      if (!game.pc.name) missing.push("pc.name");
-      if (!game.pc.archetype) missing.push("pc.archetype");
-
-      game.setupComplete = missing.length === 0;
-      game.phase = game.setupComplete ? "exploration" : "setup";
-
-      if (game.setupComplete && !game.location) {
-        game.location = "Unknown frontier";
-      }
-
-      persistGame(game);
-
-      const message = game.setupComplete
-        ? `Game ready. ${game.pc.name} enters the story.`
-        : `Setup needs ${missing.join(", ")}.`;
-
-      return replyWithState(game, message);
-    }
+    async (args) => runStartGame(args)
   );
 
   server.registerTool(
