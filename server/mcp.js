@@ -20,12 +20,12 @@ const REQUIRED_SETUP_CHOICES = ["genre", "pc.name", "pc.archetype"];
 const GAME_GUIDE_SUMMARY =
   "Read the guide, pick genre/tone and core character details, then confirm setup before starting.";
 const DEFAULT_GENRES = [
-  "Heroic Fantasy",
-  "Sword and Sorcery",
-  "Grimdark Frontier",
+  "Adventure",
+  "Mystery",
+  "Science Fiction",
 ];
-const DEFAULT_TONES = ["Adventurous", "Mystic", "Gritty"];
-const DEFAULT_ARCHETYPES = ["Ranger", "Warrior", "Mage", "Rogue", "Cleric"];
+const DEFAULT_TONES = ["Cinematic", "Grounded", "Gritty"];
+const DEFAULT_ARCHETYPES = ["Specialist", "Guardian", "Scout", "Scholar", "Wildcard"];
 const DEFAULT_PC_NAMES = ["Rowan", "Kestrel", "Iris", "Thorn", "Ash"];
 const GAME_GUIDE_TEXT = `TTRPG Game Guide (general, system-agnostic)
 
@@ -66,6 +66,33 @@ const games = new Map();
 const setupSessions = new Map();
 
 const baseStats = { str: 2, agi: 2, int: 2, cha: 2 };
+const DEFAULT_MELEE_RANGE = 1;
+const DEFAULT_MOVE_SPEED = 6;
+const MAX_RANGE = 30;
+const MAX_LEVEL = 20;
+const COMBAT_ACTIONS_REQUIRING_ACTION = new Set([
+  "attack",
+  "defend",
+  "dodge",
+  "use_skill",
+]);
+const UNARMED_WEAPON_ID = "weapon_unarmed";
+const UNARMED_WEAPON = Object.freeze({
+  id: UNARMED_WEAPON_ID,
+  name: "Default Melee",
+  category: "melee",
+  range: DEFAULT_MELEE_RANGE,
+  equipped: true,
+  damageFormula: "1",
+});
+const DEFAULT_ENEMY_WEAPON = Object.freeze({
+  id: "weapon_enemy_basic",
+  name: "Basic Weapon",
+  category: "melee",
+  range: DEFAULT_MELEE_RANGE,
+  equipped: true,
+  damageFormula: "1d6",
+});
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -103,12 +130,12 @@ function pickRandom(list, fallback) {
 
 function applySetupDefaults(args = {}) {
   const merged = mergeSetupArgs({}, args);
-  if (!merged.genre) merged.genre = pickRandom(DEFAULT_GENRES, "Heroic Fantasy");
-  if (!merged.tone) merged.tone = pickRandom(DEFAULT_TONES, "Adventurous");
+  if (!merged.genre) merged.genre = pickRandom(DEFAULT_GENRES, "Adventure");
+  if (!merged.tone) merged.tone = pickRandom(DEFAULT_TONES, "Cinematic");
   merged.pc = merged.pc ?? {};
   if (!merged.pc.name) merged.pc.name = pickRandom(DEFAULT_PC_NAMES, "Traveler");
   if (!merged.pc.archetype) {
-    merged.pc.archetype = pickRandom(DEFAULT_ARCHETYPES, "Ranger");
+    merged.pc.archetype = pickRandom(DEFAULT_ARCHETYPES, "Specialist");
   }
   return merged;
 }
@@ -216,6 +243,12 @@ function createGameState(overrides = {}) {
       archetype: overrides.pc?.archetype ?? "",
       background: overrides.pc?.background ?? "",
       goal: overrides.pc?.goal ?? "",
+      level: clamp(Number(overrides.pc?.level ?? 1), 1, MAX_LEVEL),
+      skills: Array.isArray(overrides.pc?.skills)
+        ? overrides.pc.skills
+            .map((skill) => normalizeSkill(skill, skill?.name, "skill"))
+            .filter(Boolean)
+        : [],
     },
     stats: { ...baseStats },
     hp: { current: hpMax, max: hpMax },
@@ -334,6 +367,125 @@ function normalizeStoryElements(raw) {
   return [];
 }
 
+function slugifyId(value, fallback = "entry") {
+  const slug = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || fallback;
+}
+
+function normalizeWeapon(raw, fallbackName, fallbackIdPrefix = "weapon") {
+  if (!raw) return null;
+  const category = raw.category === "ranged" ? "ranged" : "melee";
+  const defaultRange = category === "melee" ? DEFAULT_MELEE_RANGE : 6;
+  const rawRange = Number(raw.range ?? defaultRange);
+  const range = clamp(
+    Number.isFinite(rawRange) ? rawRange : defaultRange,
+    category === "melee" ? DEFAULT_MELEE_RANGE : 1,
+    MAX_RANGE
+  );
+  const fallbackId = `${fallbackIdPrefix}_${slugifyId(fallbackName, "weapon")}`;
+  return {
+    id: raw.id ?? fallbackId,
+    name: raw.name ?? fallbackName ?? "Weapon",
+    category,
+    range,
+    equipped: Boolean(raw.equipped),
+    damageFormula: raw.damageFormula ?? "",
+  };
+}
+
+function normalizeSkill(raw, fallbackName, fallbackIdPrefix = "skill") {
+  if (!raw) return null;
+  const fallbackId = `${fallbackIdPrefix}_${slugifyId(fallbackName, "skill")}`;
+  return {
+    id: raw.id ?? fallbackId,
+    name: raw.name ?? fallbackName ?? "Skill",
+    unlockLevel: clamp(Number(raw.unlockLevel ?? 1), 1, MAX_LEVEL),
+    mpCost: clamp(Number(raw.mpCost ?? 0), 0, 99),
+    range: clamp(Number(raw.range ?? DEFAULT_MELEE_RANGE), 0, MAX_RANGE),
+    target: raw.target === "self" || raw.target === "ally" ? raw.target : "enemy",
+    description: raw.description ?? "",
+  };
+}
+
+function normalizeInventoryItem(item) {
+  if (!item?.name) return null;
+  const normalized = {
+    id: item.id ?? `item_${crypto.randomUUID()}`,
+    name: item.name,
+    qty: clamp(Number(item.qty ?? 1), 1, 999),
+    notes: item.notes ?? "",
+  };
+  const normalizedWeapon = normalizeWeapon(item.weapon, item.name, "weapon");
+  if (normalizedWeapon) {
+    normalized.weapon = normalizedWeapon;
+  }
+  return normalized;
+}
+
+function getSkillCatalog(level, existing = []) {
+  const known = new Map();
+  if (Array.isArray(existing)) {
+    existing.forEach((skill) => {
+      const normalized = normalizeSkill(skill, skill?.name, "skill");
+      if (normalized) known.set(normalized.id, normalized);
+    });
+  }
+  const allSkills = [...known.values()].sort(
+    (a, b) => a.unlockLevel - b.unlockLevel || a.name.localeCompare(b.name)
+  );
+  const safeLevel = clamp(Number(level ?? 1), 1, MAX_LEVEL);
+  return {
+    allSkills,
+    unlockedSkills: allSkills.filter((skill) => skill.unlockLevel <= safeLevel),
+  };
+}
+
+function getInventoryWeapons(inventory = []) {
+  if (!Array.isArray(inventory)) return [];
+  const weapons = inventory
+    .filter((item) => item?.weapon && Number(item.qty ?? 0) > 0)
+    .map((item) => normalizeWeapon(item.weapon, item.name, "weapon"))
+    .filter(Boolean);
+  return weapons;
+}
+
+function ensureSingleEquippedWeapon(weapons = [], preferredWeaponId) {
+  if (!Array.isArray(weapons) || weapons.length === 0) return [];
+  const preferred =
+    preferredWeaponId && weapons.some((weapon) => weapon.id === preferredWeaponId)
+      ? preferredWeaponId
+      : null;
+  const firstEquipped = weapons.find((weapon) => weapon.equipped)?.id ?? null;
+  const selectedId = preferred ?? firstEquipped ?? weapons[0].id;
+  return weapons.map((weapon) => ({
+    ...weapon,
+    equipped: weapon.id === selectedId,
+  }));
+}
+
+function syncInventoryWeaponEquipFlags(inventory = [], preferredWeaponId) {
+  if (!Array.isArray(inventory)) return;
+  const normalizedWeapons = inventory
+    .filter((item) => item?.weapon)
+    .map((item) => ({
+      item,
+      weapon: normalizeWeapon(item.weapon, item.name, "weapon"),
+    }))
+    .filter((entry) => entry.weapon);
+  if (normalizedWeapons.length === 0) return;
+  const normalized = ensureSingleEquippedWeapon(
+    normalizedWeapons.map((entry) => entry.weapon),
+    preferredWeaponId
+  );
+  normalized.forEach((weapon, index) => {
+    normalizedWeapons[index].item.weapon = weapon;
+  });
+}
+
 function applyInventoryDelta(game, delta) {
   if (!delta) return;
   const { add, remove } = delta;
@@ -347,13 +499,12 @@ function applyInventoryDelta(game, delta) {
       if (existing) {
         existing.qty = clamp(existing.qty + qty, 0, 999);
         if (item.notes) existing.notes = item.notes;
+        const normalizedWeapon = normalizeWeapon(item.weapon, item.name, "weapon");
+        if (normalizedWeapon) existing.weapon = normalizedWeapon;
       } else {
-        game.inventory.push({
-          id: `item_${crypto.randomUUID()}`,
-          name: item.name,
-          qty,
-          notes: item.notes ?? "",
-        });
+        const normalized = normalizeInventoryItem(item);
+        if (!normalized) return;
+        game.inventory.push(normalized);
       }
     });
   }
@@ -370,6 +521,7 @@ function applyInventoryDelta(game, delta) {
       }
     });
   }
+  syncInventoryWeaponEquipFlags(game.inventory);
 }
 
 function getEnemyStatus(hp, hpMax) {
@@ -383,6 +535,325 @@ function getEnemyStatus(hp, hpMax) {
   if (pct <= 60) return "Wounded";
   if (pct <= 85) return "Scratched";
   return "Unhurt";
+}
+
+function getCombatantSpeed(combatant) {
+  return clamp(Number(combatant?.speed ?? DEFAULT_MOVE_SPEED), 0, MAX_RANGE);
+}
+
+function buildPcCombatant(game, existingPc = {}, patch = {}) {
+  const safeLevel = clamp(
+    Number(patch.level ?? game.pc?.level ?? existingPc.level ?? 1),
+    1,
+    MAX_LEVEL
+  );
+  const baseWeapons = getInventoryWeapons(game.inventory);
+  const hasUnarmed = baseWeapons.some((weapon) => weapon.id === UNARMED_WEAPON_ID);
+  const weapons = ensureSingleEquippedWeapon(
+    hasUnarmed ? baseWeapons : [...baseWeapons, { ...UNARMED_WEAPON }],
+    patch.equippedWeaponId ?? existingPc.equippedWeaponId
+  );
+  const equippedWeaponId = weapons.find((weapon) => weapon.equipped)?.id ?? UNARMED_WEAPON_ID;
+  const skillCatalog = getSkillCatalog(
+    safeLevel,
+    patch.skills ?? game.pc?.skills ?? existingPc.skills
+  );
+  const speed = clamp(Number(patch.speed ?? existingPc.speed ?? DEFAULT_MOVE_SPEED), 0, MAX_RANGE);
+  const hpMax = clamp(Number(game.hp?.max ?? patch.hpMax ?? existingPc.hpMax ?? 12), 1, 999);
+  const mpMax = clamp(Number(game.mp?.max ?? patch.mpMax ?? existingPc.mpMax ?? 0), 0, 999);
+  return {
+    id: existingPc.id ?? `pc_${game.gameId}`,
+    name: game.pc?.name || existingPc.name || "Player",
+    hpMax,
+    hp: clamp(Number(patch.hp ?? existingPc.hp ?? game.hp?.current ?? hpMax), 0, hpMax),
+    mpMax,
+    mp: clamp(Number(patch.mp ?? existingPc.mp ?? game.mp?.current ?? mpMax), 0, mpMax),
+    level: safeLevel,
+    position: clamp(Number(patch.position ?? existingPc.position ?? 0), 0, 100),
+    speed,
+    movementRemaining: clamp(
+      Number(patch.movementRemaining ?? existingPc.movementRemaining ?? speed),
+      0,
+      speed
+    ),
+    actionUsed: Boolean(patch.actionUsed ?? existingPc.actionUsed ?? false),
+    defending: Boolean(patch.defending ?? existingPc.defending ?? false),
+    dodging: Boolean(patch.dodging ?? existingPc.dodging ?? false),
+    weapons,
+    equippedWeaponId,
+    skills: skillCatalog.allSkills,
+  };
+}
+
+function buildEnemyCombatant(enemy, existingEnemy = {}, index = 0) {
+  if (!enemy?.name && !existingEnemy?.name) return null;
+  const hpMax = clamp(Number(enemy?.hpMax ?? existingEnemy?.hpMax ?? 10), 1, 999);
+  const hp = clamp(Number(enemy?.hp ?? existingEnemy?.hp ?? hpMax), 0, hpMax);
+  const safeLevel = clamp(Number(enemy?.level ?? existingEnemy?.level ?? 1), 1, MAX_LEVEL);
+  const sourceWeapons = Array.isArray(enemy?.weapons)
+    ? enemy.weapons
+    : Array.isArray(existingEnemy?.weapons)
+      ? existingEnemy.weapons
+      : [];
+  const normalizedWeapons = sourceWeapons
+    .map((weapon, weaponIndex) =>
+      normalizeWeapon(
+        weapon,
+        weapon?.name ?? `${enemy?.name ?? existingEnemy?.name} weapon ${weaponIndex + 1}`,
+        "weapon_enemy"
+      )
+    )
+    .filter(Boolean);
+  const withDefaultWeapon =
+    normalizedWeapons.length > 0 ? normalizedWeapons : [{ ...DEFAULT_ENEMY_WEAPON }];
+  const weapons = ensureSingleEquippedWeapon(
+    withDefaultWeapon,
+    enemy?.equippedWeaponId ?? existingEnemy?.equippedWeaponId
+  );
+  const equippedWeaponId = weapons.find((weapon) => weapon.equipped)?.id ?? weapons[0].id;
+  const rawSkills = Array.isArray(enemy?.skills)
+    ? enemy.skills
+    : Array.isArray(existingEnemy?.skills)
+      ? existingEnemy.skills
+      : [];
+  const skills = rawSkills
+    .map((skill, skillIndex) =>
+      normalizeSkill(
+        skill,
+        skill?.name ?? `Skill ${skillIndex + 1}`,
+        "skill_enemy"
+      )
+    )
+    .filter(Boolean);
+  const speed = clamp(
+    Number(enemy?.speed ?? existingEnemy?.speed ?? DEFAULT_MOVE_SPEED),
+    0,
+    MAX_RANGE
+  );
+  return {
+    id: enemy?.id ?? existingEnemy?.id ?? `enemy_${crypto.randomUUID()}`,
+    name: enemy?.name ?? existingEnemy?.name ?? `Enemy ${index + 1}`,
+    hp,
+    hpMax,
+    mp: clamp(Number(enemy?.mp ?? existingEnemy?.mp ?? 0), 0, 999),
+    mpMax: clamp(Number(enemy?.mpMax ?? existingEnemy?.mpMax ?? 0), 0, 999),
+    status: enemy?.status ?? existingEnemy?.status ?? getEnemyStatus(hp, hpMax),
+    intent: enemy?.intent ?? existingEnemy?.intent ?? "",
+    note: enemy?.note ?? existingEnemy?.note ?? "",
+    level: safeLevel,
+    position: clamp(Number(enemy?.position ?? existingEnemy?.position ?? DEFAULT_MELEE_RANGE), 0, 100),
+    speed,
+    movementRemaining: clamp(
+      Number(enemy?.movementRemaining ?? existingEnemy?.movementRemaining ?? speed),
+      0,
+      speed
+    ),
+    actionUsed: Boolean(enemy?.actionUsed ?? existingEnemy?.actionUsed ?? false),
+    defending: Boolean(enemy?.defending ?? existingEnemy?.defending ?? false),
+    dodging: Boolean(enemy?.dodging ?? existingEnemy?.dodging ?? false),
+    weapons,
+    equippedWeaponId,
+    skills,
+  };
+}
+
+function isCombatantAlive(combatant) {
+  return Number(combatant?.hp ?? 0) > 0;
+}
+
+function getCombatantRef(combat, combatantId) {
+  if (!combat || !combatantId) return null;
+  if (combat.pc?.id === combatantId) {
+    return { kind: "pc", combatant: combat.pc };
+  }
+  const enemy = Array.isArray(combat.enemies)
+    ? combat.enemies.find((entry) => entry.id === combatantId)
+    : null;
+  if (!enemy) return null;
+  return { kind: "enemy", combatant: enemy };
+}
+
+function distanceBetweenCombatants(source, target) {
+  return Math.abs(Number(source?.position ?? 0) - Number(target?.position ?? 0));
+}
+
+function getWeaponFromCombatant(combatant, requestedWeaponId) {
+  const weapons = ensureSingleEquippedWeapon(
+    Array.isArray(combatant?.weapons) ? combatant.weapons : [],
+    combatant?.equippedWeaponId
+  );
+  combatant.weapons = weapons;
+  combatant.equippedWeaponId = weapons.find((weapon) => weapon.equipped)?.id ?? null;
+  if (weapons.length === 0) return null;
+  const selectedId = requestedWeaponId ?? combatant.equippedWeaponId;
+  const weapon = weapons.find((entry) => entry.id === selectedId && entry.equipped);
+  return weapon ?? null;
+}
+
+function getUsableSkill(combatant, skillId) {
+  if (!skillId) return null;
+  const level = clamp(Number(combatant?.level ?? 1), 1, MAX_LEVEL);
+  const skills = Array.isArray(combatant?.skills) ? combatant.skills : [];
+  return (
+    skills.find((skill) => skill.id === skillId && Number(skill.unlockLevel ?? 1) <= level) ??
+    null
+  );
+}
+
+function ensureCombatTurnState(combatant) {
+  const speed = getCombatantSpeed(combatant);
+  combatant.speed = speed;
+  combatant.movementRemaining = clamp(
+    Number(combatant.movementRemaining ?? speed),
+    0,
+    speed
+  );
+  combatant.actionUsed = Boolean(combatant.actionUsed);
+}
+
+function syncCombatState(game) {
+  if (!game?.combat) return;
+  const combat = game.combat;
+  combat.round = clamp(Number(combat.round ?? 1), 1, 999);
+  combat.pc = buildPcCombatant(game, combat.pc);
+  combat.enemies = (Array.isArray(combat.enemies) ? combat.enemies : [])
+    .map((enemy, index) => buildEnemyCombatant(enemy, enemy, index))
+    .filter(Boolean);
+  combat.enemies.forEach((enemy) => {
+    enemy.status = getEnemyStatus(enemy.hp, enemy.hpMax);
+    ensureCombatTurnState(enemy);
+  });
+  ensureCombatTurnState(combat.pc);
+  combat.pc.hp = clamp(combat.pc.hp, 0, combat.pc.hpMax);
+  combat.pc.mp = clamp(combat.pc.mp, 0, combat.pc.mpMax);
+  game.hp.current = clamp(combat.pc.hp, 0, game.hp.max);
+  game.mp.current = clamp(combat.pc.mp, 0, game.mp.max);
+  game.pc.level = clamp(Number(combat.pc.level ?? game.pc.level ?? 1), 1, MAX_LEVEL);
+  game.pc.skills = Array.isArray(combat.pc.skills)
+    ? combat.pc.skills.map((skill) => normalizeSkill(skill, skill?.name, "skill")).filter(Boolean)
+    : [];
+
+  const fallbackInitiative = [
+    { id: combat.pc.id, name: combat.pc.name, kind: "pc" },
+    ...combat.enemies.map((enemy) => ({
+      id: enemy.id,
+      name: enemy.name,
+      kind: "enemy",
+    })),
+  ];
+  const candidateInitiative = Array.isArray(combat.initiative)
+    ? combat.initiative
+    : fallbackInitiative;
+  const seen = new Set();
+  const normalizedInitiative = candidateInitiative
+    .map((entry) => {
+      if (!entry?.id || seen.has(entry.id)) return null;
+      const ref = getCombatantRef(combat, entry.id);
+      if (!ref) return null;
+      seen.add(entry.id);
+      return {
+        id: entry.id,
+        name: ref.combatant.name,
+        kind: ref.kind,
+        initiative: normalizeInitiativeScore(entry.initiative),
+      };
+    })
+    .filter(Boolean);
+
+  const requiredEntries = [combat.pc, ...combat.enemies];
+  requiredEntries.forEach((combatant) => {
+    if (!seen.has(combatant.id)) {
+      normalizedInitiative.push({
+        id: combatant.id,
+        name: combatant.name,
+        kind: combat.pc.id === combatant.id ? "pc" : "enemy",
+      });
+    }
+  });
+
+  const withScores = applyInitiativeScores(normalizedInitiative);
+  combat.initiative = withScores.sort((a, b) => b.initiative - a.initiative);
+  const aliveTurnEntry = combat.initiative.find((entry) =>
+    isCombatantAlive(getCombatantRef(combat, entry.id)?.combatant)
+  );
+  const currentTurnIsValid = combat.initiative.some(
+    (entry) => entry.id === combat.currentTurnId
+  );
+  if (!currentTurnIsValid) {
+    combat.currentTurnId = aliveTurnEntry?.id ?? combat.initiative[0]?.id ?? null;
+  }
+
+  const currentActorRef = getCombatantRef(combat, combat.currentTurnId);
+  const currentActor = currentActorRef?.combatant ?? null;
+  const currentSkills = currentActor
+    ? getSkillCatalog(currentActor.level, currentActor.skills).unlockedSkills
+    : [];
+  combat.rules = {
+    meleeRange: DEFAULT_MELEE_RANGE,
+    actionTypes: ["attack", "defend", "dodge", "use_skill"],
+    moveIsFree: true,
+    oneActionPerTurn: true,
+  };
+  combat.turn = currentActor
+    ? {
+        actorId: currentActor.id,
+        actorName: currentActor.name,
+        kind: currentActorRef.kind,
+        actionUsed: Boolean(currentActor.actionUsed),
+        movementRemaining: Number(currentActor.movementRemaining ?? 0),
+        equippedWeaponId: currentActor.equippedWeaponId ?? null,
+        availableSkillIds: currentSkills.map((skill) => skill.id),
+      }
+    : null;
+}
+
+function resolveCombatOutcome(game) {
+  if (!game?.combat) return null;
+  const pcAlive = isCombatantAlive(game.combat.pc);
+  const enemiesAlive = game.combat.enemies.some((enemy) => isCombatantAlive(enemy));
+  if (!pcAlive) {
+    game.combat = null;
+    game.phase = "exploration";
+    addLog(game, "Combat ended. The player is down.", "combat");
+    return "player_down";
+  }
+  if (!enemiesAlive) {
+    game.combat = null;
+    game.phase = "exploration";
+    addLog(game, "Combat ended. All enemies are down.", "combat");
+    return "victory";
+  }
+  return null;
+}
+
+function advanceCombatTurn(game) {
+  if (!game?.combat || !Array.isArray(game.combat.initiative) || game.combat.initiative.length === 0) {
+    return { ok: false, message: "Initiative order is missing." };
+  }
+  const combat = game.combat;
+  const currentIndex = Math.max(
+    0,
+    combat.initiative.findIndex((entry) => entry.id === combat.currentTurnId)
+  );
+  let wrapped = false;
+  for (let offset = 1; offset <= combat.initiative.length; offset += 1) {
+    const nextIndex = (currentIndex + offset) % combat.initiative.length;
+    if (nextIndex <= currentIndex) wrapped = true;
+    const candidateEntry = combat.initiative[nextIndex];
+    const candidateRef = getCombatantRef(combat, candidateEntry.id);
+    if (!candidateRef || !isCombatantAlive(candidateRef.combatant)) continue;
+    combat.currentTurnId = candidateEntry.id;
+    if (wrapped) {
+      combat.round = clamp(Number(combat.round ?? 1) + 1, 1, 999);
+    }
+    candidateRef.combatant.actionUsed = false;
+    candidateRef.combatant.defending = false;
+    candidateRef.combatant.dodging = false;
+    candidateRef.combatant.movementRemaining = getCombatantSpeed(candidateRef.combatant);
+    syncCombatState(game);
+    return { ok: true, actorName: candidateRef.combatant.name };
+  }
+  return { ok: false, message: "No living combatants are available in initiative." };
 }
 
 function applyCombatUpdate(game, combatUpdate) {
@@ -425,54 +896,51 @@ function applyCombatUpdate(game, combatUpdate) {
       combatUpdate.enemyHpMax !== undefined ||
       combatUpdate.enemyIntent !== undefined;
 
-    let enemies = Array.isArray(existingCombat.enemies)
-      ? [...existingCombat.enemies]
+    const existingEnemies = Array.isArray(existingCombat.enemies)
+      ? existingCombat.enemies
       : [];
+    let enemies = existingEnemies;
 
     if (hasExplicitEnemies) {
       enemies = combatUpdate.enemies
-        .map((enemy) => {
-          if (!enemy?.name) return null;
-          const hpMax = clamp(Number(enemy.hpMax ?? 10), 1, 999);
-          const hp = clamp(Number(enemy.hp ?? hpMax), 0, hpMax);
-          return {
-            id: enemy.id ?? `enemy_${crypto.randomUUID()}`,
-            name: enemy.name,
-            hp,
-            hpMax,
-            status: enemy.status ?? getEnemyStatus(hp, hpMax),
-            intent: enemy.intent ?? "",
-            note: enemy.note ?? "",
-          };
+        .map((enemy, index) => {
+          const existingEnemy = existingEnemies.find((entry) =>
+            enemy?.id ? entry.id === enemy.id : entry.name === enemy?.name
+          );
+          return buildEnemyCombatant(enemy, existingEnemy, index);
         })
         .filter(Boolean);
     } else if (hasSingleEnemyFields) {
-      const hpMax = clamp(Number(combatUpdate.enemyHpMax ?? 10), 1, 999);
-      const hp = clamp(Number(combatUpdate.enemyHp ?? hpMax), 0, hpMax);
       enemies = [
-        {
-          id: `enemy_${crypto.randomUUID()}`,
-          name: combatUpdate.enemyName ?? "Unknown threat",
-          hp,
-          hpMax,
-          status: getEnemyStatus(hp, hpMax),
-          intent: combatUpdate.enemyIntent ?? "",
-          note: "",
-        },
-      ];
+        buildEnemyCombatant(
+          {
+            id: `enemy_${crypto.randomUUID()}`,
+            name: combatUpdate.enemyName ?? "Unknown threat",
+            hp: combatUpdate.enemyHp,
+            hpMax: combatUpdate.enemyHpMax,
+            intent: combatUpdate.enemyIntent,
+          },
+          null,
+          0
+        ),
+      ].filter(Boolean);
     } else if (enemies.length === 0) {
       enemies = [
-        {
-          id: `enemy_${crypto.randomUUID()}`,
-          name: "Unknown threat",
-          hp: 10,
-          hpMax: 10,
-          status: "Unhurt",
-          intent: "",
-          note: "",
-        },
-      ];
+        buildEnemyCombatant(
+          {
+            id: `enemy_${crypto.randomUUID()}`,
+            name: "Unknown threat",
+            hp: 10,
+            hpMax: 10,
+          },
+          null,
+          0
+        ),
+      ].filter(Boolean);
     }
+
+    const pcPatch = combatUpdate.pc ?? {};
+    const pc = buildPcCombatant(game, existingCombat.pc ?? {}, pcPatch);
 
     const hasExplicitInitiative = Array.isArray(combatUpdate.initiative);
     let initiative = Array.isArray(existingCombat.initiative)
@@ -481,30 +949,49 @@ function applyCombatUpdate(game, combatUpdate) {
     if (hasExplicitInitiative) {
       initiative = combatUpdate.initiative
         .map((entry) => {
-          if (!entry?.name) return null;
+          if (!entry?.name && !entry?.id) return null;
+          const resolvedId =
+            entry.id ??
+            (entry.kind === "pc"
+              ? pc.id
+              : enemies.find((enemy) => enemy.name === entry.name)?.id) ??
+            null;
+          if (!resolvedId) return null;
+          const isPc = resolvedId === pc.id;
           return {
-            id: entry.id ?? `init_${crypto.randomUUID()}`,
-            name: entry.name,
-            kind: entry.kind === "enemy" ? "enemy" : "pc",
-            initiative: Number(entry.initiative ?? 0),
+            id: resolvedId,
+            name: isPc
+              ? pc.name
+              : enemies.find((enemy) => enemy.id === resolvedId)?.name ?? entry.name ?? "Enemy",
+            kind: isPc ? "pc" : "enemy",
+            initiative: normalizeInitiativeScore(entry.initiative),
           };
         })
         .filter(Boolean)
-        .sort((a, b) => b.initiative - a.initiative);
+        .sort((a, b) => Number(b.initiative ?? 0) - Number(a.initiative ?? 0));
     }
 
-    if (initiative.length > 0 && game.pc?.name) {
-      const hasPc = initiative.some((entry) => entry.kind === "pc");
-      if (!hasPc) {
-        initiative.push({
-          id: `init_${crypto.randomUUID()}`,
-          name: game.pc.name,
-          kind: "pc",
-          initiative: 0,
-        });
-        initiative.sort((a, b) => b.initiative - a.initiative);
-      }
+    const hasPcEntry = initiative.some((entry) => entry.id === pc.id);
+    if (!hasPcEntry) {
+      initiative.push({
+        id: pc.id,
+        name: pc.name,
+        kind: "pc",
+      });
     }
+    enemies.forEach((enemy) => {
+      const hasEnemyEntry = initiative.some((entry) => entry.id === enemy.id);
+      if (!hasEnemyEntry) {
+        initiative.push({
+          id: enemy.id,
+          name: enemy.name,
+          kind: "enemy",
+        });
+      }
+    });
+    initiative = applyInitiativeScores(initiative).sort(
+      (a, b) => Number(b.initiative ?? 0) - Number(a.initiative ?? 0)
+    );
 
     let currentTurnId = combatUpdate.currentTurnId;
     if (!currentTurnId) {
@@ -520,10 +1007,22 @@ function applyCombatUpdate(game, combatUpdate) {
     game.combat = {
       round: Number(combatUpdate.round ?? existingCombat.round ?? 1),
       currentTurnId,
+      pc,
       enemies,
       initiative,
     };
     game.phase = "combat";
+    syncCombatState(game);
+    if (
+      game.combat &&
+      getCombatantRef(game.combat, game.combat.currentTurnId)?.kind === "enemy"
+    ) {
+      const enemyResolution = resolveEnemyTurnsUntilPlayerTurn(game);
+      if (!enemyResolution.ok) {
+        addLog(game, `Enemy turn resolution failed: ${enemyResolution.message}`, "system");
+      }
+      syncCombatState(game);
+    }
 
     if (!wasInCombat) {
       const enemyNames = enemies.map((enemy) => enemy.name).join(", ");
@@ -532,21 +1031,533 @@ function applyCombatUpdate(game, combatUpdate) {
   }
 }
 
+function applyDamage(combatant, amount) {
+  const safeAmount = clamp(Number(amount ?? 0), 0, 999);
+  if (!safeAmount) return 0;
+  const before = combatant.hp;
+  combatant.hp = clamp(Number(combatant.hp ?? 0) - safeAmount, 0, combatant.hpMax);
+  return before - combatant.hp;
+}
+
+function applyHealing(combatant, amount) {
+  const safeAmount = clamp(Number(amount ?? 0), 0, 999);
+  if (!safeAmount) return 0;
+  const before = combatant.hp;
+  combatant.hp = clamp(Number(combatant.hp ?? 0) + safeAmount, 0, combatant.hpMax);
+  return combatant.hp - before;
+}
+
+function resolveCombatAmount({ explicitAmount, formula, fallback = 0 }) {
+  if (explicitAmount !== undefined) {
+    return {
+      amount: clamp(Number(explicitAmount), 0, 999),
+      roll: null,
+      source: "explicit",
+    };
+  }
+  if (formula) {
+    const roll = rollDice(formula);
+    if (roll) {
+      return {
+        amount: clamp(Number(roll.total), 0, 999),
+        roll,
+        source: "rolled",
+      };
+    }
+  }
+  return {
+    amount: clamp(Number(fallback), 0, 999),
+    roll: null,
+    source: "fallback",
+  };
+}
+
+function rollInitiativeScore() {
+  const roll = rollDice("d20");
+  if (roll) return roll.total;
+  return crypto.randomInt(1, 21);
+}
+
+function normalizeInitiativeScore(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
+function applyInitiativeScores(entries = []) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const normalized = entries.map((entry) => ({
+    ...entry,
+    initiative: normalizeInitiativeScore(entry?.initiative),
+  }));
+  const allZero =
+    normalized.length > 0 &&
+    normalized.every((entry) => Number(entry.initiative ?? 0) === 0);
+  const hasMissing = normalized.some((entry) => entry.initiative === null);
+  if (!allZero && !hasMissing) {
+    return normalized.map((entry) => ({
+      ...entry,
+      initiative: Number(entry.initiative),
+    }));
+  }
+  return normalized.map((entry) => ({
+    ...entry,
+    initiative: rollInitiativeScore(),
+  }));
+}
+
+function getWeaponRange(weapon) {
+  if (!weapon) return 0;
+  if (weapon.category === "melee") return DEFAULT_MELEE_RANGE;
+  return clamp(Number(weapon.range ?? 1), 1, MAX_RANGE);
+}
+
+function moveCombatantToward(source, target, desiredDistance = 0) {
+  const currentDistance = distanceBetweenCombatants(source, target);
+  const maxMove = clamp(Number(source.movementRemaining ?? 0), 0, MAX_RANGE);
+  const requiredMove = clamp(currentDistance - desiredDistance, 0, MAX_RANGE);
+  const actualMove = clamp(Math.min(requiredMove, maxMove), 0, MAX_RANGE);
+  if (actualMove <= 0) return 0;
+
+  const direction = Number(target.position ?? 0) >= Number(source.position ?? 0) ? 1 : -1;
+  const nextPosition = clamp(Number(source.position ?? 0) + direction * actualMove, 0, 100);
+  const traveled = Math.abs(nextPosition - Number(source.position ?? 0));
+  source.position = nextPosition;
+  source.movementRemaining = clamp(maxMove - traveled, 0, source.speed);
+  return traveled;
+}
+
+function resolveEnemyTurnOnce(game) {
+  if (!game?.combat) {
+    return { ok: false, message: "Combat is not active." };
+  }
+  syncCombatState(game);
+  const combat = game.combat;
+  const actorRef = getCombatantRef(combat, combat.currentTurnId);
+  if (!actorRef || actorRef.kind !== "enemy") {
+    return { ok: false, message: "Current turn is not an enemy turn." };
+  }
+  const enemy = actorRef.combatant;
+  const pc = combat.pc;
+  ensureCombatTurnState(enemy);
+  const events = [];
+
+  if (!isCombatantAlive(enemy)) {
+    const advanceDown = advanceCombatTurn(game);
+    if (!advanceDown.ok) return { ok: false, message: advanceDown.message };
+    return {
+      ok: true,
+      summary: `${enemy.name} is down and cannot act.`,
+    };
+  }
+  if (!isCombatantAlive(pc)) {
+    return { ok: true, summary: "Player is already down." };
+  }
+
+  const weapon = getWeaponFromCombatant(enemy, null);
+  if (!weapon) {
+    enemy.actionUsed = true;
+    enemy.defending = true;
+    events.push(`${enemy.name} takes a defensive stance.`);
+  } else {
+    const attackRange = getWeaponRange(weapon);
+    const moved = moveCombatantToward(enemy, pc, attackRange);
+    if (moved > 0) {
+      events.push(`${enemy.name} moves ${moved} to close distance.`);
+    }
+
+    const distance = distanceBetweenCombatants(enemy, pc);
+    if (distance <= attackRange) {
+      const damageResolution = resolveCombatAmount({
+        explicitAmount: undefined,
+        formula: weapon.damageFormula,
+        fallback: 0,
+      });
+      enemy.actionUsed = true;
+      const dealt = applyDamage(pc, damageResolution.amount);
+      let attackMessage =
+        dealt > 0
+          ? `${enemy.name} attacks ${pc.name} with ${weapon.name} for ${dealt} damage.`
+          : `${enemy.name} attacks ${pc.name} with ${weapon.name}.`;
+      if (damageResolution.source === "rolled" && damageResolution.roll) {
+        attackMessage += ` [${damageResolution.roll.formula}=${damageResolution.roll.total}]`;
+      }
+      events.push(attackMessage);
+    } else {
+      enemy.actionUsed = true;
+      enemy.dodging = true;
+      events.push(`${enemy.name} cannot reach attack range and takes evasive movement.`);
+    }
+  }
+
+  events.forEach((entry) => addLog(game, entry, "combat"));
+  syncCombatState(game);
+  const outcome = resolveCombatOutcome(game);
+  if (outcome) {
+    return { ok: true, summary: events.join(" ") };
+  }
+
+  const advance = advanceCombatTurn(game);
+  if (!advance.ok) {
+    return { ok: false, message: advance.message };
+  }
+  return {
+    ok: true,
+    summary: events.join(" "),
+  };
+}
+
+function resolveEnemyTurnsUntilPlayerTurn(game, maxTurns = 20) {
+  const summaries = [];
+  for (let turns = 0; turns < maxTurns; turns += 1) {
+    if (!game?.combat) break;
+    syncCombatState(game);
+    const currentRef = getCombatantRef(game.combat, game.combat.currentTurnId);
+    if (!currentRef || currentRef.kind !== "enemy") break;
+
+    const resolved = resolveEnemyTurnOnce(game);
+    if (!resolved.ok) {
+      return { ok: false, message: resolved.message, summaries };
+    }
+    if (resolved.summary) summaries.push(resolved.summary);
+    if (!game.combat) break;
+  }
+  return { ok: true, summaries };
+}
+
+function resolveTurnTransition(game) {
+  const advance = advanceCombatTurn(game);
+  if (!advance.ok) {
+    return { ok: false, message: advance.message };
+  }
+  let summary = `Turn ends. It is now ${advance.actorName}'s turn.`;
+  addLog(game, summary, "combat");
+
+  const nextActorRef = game.combat
+    ? getCombatantRef(game.combat, game.combat.currentTurnId)
+    : null;
+  if (nextActorRef?.kind === "enemy") {
+    const enemyResolution = resolveEnemyTurnsUntilPlayerTurn(game);
+    if (!enemyResolution.ok) {
+      return { ok: false, message: enemyResolution.message };
+    }
+    if (enemyResolution.summaries.length > 0) {
+      summary += ` Enemy turns resolved: ${enemyResolution.summaries.join(" ")}`;
+    }
+    if (game.combat) {
+      const actorAfterEnemyTurns = getCombatantRef(
+        game.combat,
+        game.combat.currentTurnId
+      )?.combatant;
+      if (actorAfterEnemyTurns) {
+        summary += ` It is now ${actorAfterEnemyTurns.name}'s turn.`;
+      }
+    }
+  }
+  return { ok: true, summary };
+}
+
+function resolveCombatAction(game, actionArgs = {}) {
+  if (!game?.combat) {
+    return { ok: false, message: "Combat is not active. Start combat first." };
+  }
+  syncCombatState(game);
+  if (
+    game.combat &&
+    getCombatantRef(game.combat, game.combat.currentTurnId)?.kind === "enemy"
+  ) {
+    const enemyResolution = resolveEnemyTurnsUntilPlayerTurn(game);
+    if (!enemyResolution.ok) {
+      return { ok: false, message: enemyResolution.message };
+    }
+    syncCombatState(game);
+    if (!game.combat) {
+      return {
+        ok: true,
+        message:
+          enemyResolution.summaries.length > 0
+            ? `Enemy turns resolved: ${enemyResolution.summaries.join(" ")}`
+            : "Enemy turns resolved.",
+      };
+    }
+  }
+
+  let combat = game.combat;
+  let actorId = actionArgs.actorId ?? combat.currentTurnId;
+  const actionType = actionArgs.action;
+  let actorRef = getCombatantRef(combat, actorId);
+  if (!actorRef) {
+    return { ok: false, message: "Actor not found in this combat." };
+  }
+  if (combat.currentTurnId !== actorId) {
+    return { ok: false, message: "Only the combatant whose turn it is can act." };
+  }
+
+  const actor = actorRef.combatant;
+  ensureCombatTurnState(actor);
+  if (!isCombatantAlive(actor)) {
+    return { ok: false, message: `${actor.name} is down and cannot act.` };
+  }
+  if (
+    actorRef.kind === "pc" &&
+    COMBAT_ACTIONS_REQUIRING_ACTION.has(actionType) &&
+    actionType !== "end_turn" &&
+    actor.actionUsed
+  ) {
+    const transition = resolveTurnTransition(game);
+    if (!transition.ok) {
+      return { ok: false, message: transition.message };
+    }
+    syncCombatState(game);
+    if (!game.combat) {
+      return { ok: true, message: transition.summary };
+    }
+    combat = game.combat;
+    actorId = combat.currentTurnId;
+    actorRef = getCombatantRef(combat, actorId);
+    if (!actorRef || actorRef.kind !== "pc") {
+      return { ok: false, message: "Player turn is not ready yet. Try again." };
+    }
+  }
+  const refreshedActor = actorRef.combatant;
+  ensureCombatTurnState(refreshedActor);
+  if (!isCombatantAlive(refreshedActor)) {
+    return { ok: false, message: `${refreshedActor.name} is down and cannot act.` };
+  }
+  if (COMBAT_ACTIONS_REQUIRING_ACTION.has(actionType) && refreshedActor.actionUsed) {
+    return {
+      ok: false,
+      message: `${refreshedActor.name} has already used an action this turn.`,
+    };
+  }
+
+  const resolveTarget = (targetId) => {
+    const targetRef = getCombatantRef(combat, targetId);
+    if (!targetRef) return { error: "Target not found in this combat." };
+    if (!isCombatantAlive(targetRef.combatant)) {
+      return { error: `${targetRef.combatant.name} is already down.` };
+    }
+    return { targetRef };
+  };
+
+  let message = "";
+  let usedAction = false;
+
+  if (actionType === "move") {
+    if (actionArgs.moveBy === undefined && actionArgs.moveTo === undefined) {
+      return { ok: false, message: "Move requires moveBy or moveTo." };
+    }
+    const current = Number(actor.position ?? 0);
+    const nextPosition =
+      actionArgs.moveTo !== undefined
+        ? clamp(Number(actionArgs.moveTo), 0, 100)
+        : clamp(current + Number(actionArgs.moveBy), 0, 100);
+    const distance = Math.abs(nextPosition - current);
+    if (distance > Number(actor.movementRemaining ?? 0)) {
+      return {
+        ok: false,
+        message: `${actor.name} only has ${actor.movementRemaining} movement remaining this turn.`,
+      };
+    }
+    refreshedActor.position = nextPosition;
+    refreshedActor.movementRemaining = clamp(
+      refreshedActor.movementRemaining - distance,
+      0,
+      refreshedActor.speed
+    );
+    message = `${refreshedActor.name} moves to position ${refreshedActor.position}.`;
+    addLog(game, message, "combat");
+  } else if (actionType === "attack") {
+    if (!actionArgs.targetId) {
+      return { ok: false, message: "Attack requires a targetId." };
+    }
+    const targetResult = resolveTarget(actionArgs.targetId);
+    if (targetResult.error) {
+      return { ok: false, message: targetResult.error };
+    }
+    const { targetRef } = targetResult;
+    if (targetRef.combatant.id === refreshedActor.id) {
+      return { ok: false, message: "Attack target cannot be the same as the attacker." };
+    }
+    const weapon = getWeaponFromCombatant(refreshedActor, actionArgs.weaponId);
+    if (!weapon) {
+      return {
+        ok: false,
+        message: `${refreshedActor.name} must use an equipped weapon to attack.`,
+      };
+    }
+    const attackRange =
+      weapon.category === "melee"
+        ? DEFAULT_MELEE_RANGE
+        : clamp(Number(weapon.range ?? 1), 1, MAX_RANGE);
+    const distance = distanceBetweenCombatants(refreshedActor, targetRef.combatant);
+    if (distance > attackRange) {
+      return {
+        ok: false,
+        message:
+          `${targetRef.combatant.name} is out of range. ` +
+          `${refreshedActor.name} needs range ${attackRange} but distance is ${distance}.`,
+      };
+    }
+    const damageResolution = resolveCombatAmount({
+      explicitAmount: actionArgs.damage,
+      formula: weapon.damageFormula,
+      fallback: 0,
+    });
+    refreshedActor.actionUsed = true;
+    usedAction = true;
+    const dealt = applyDamage(targetRef.combatant, damageResolution.amount);
+    message =
+      dealt > 0
+        ? `${refreshedActor.name} attacks ${targetRef.combatant.name} with ${weapon.name} for ${dealt} damage.`
+        : `${refreshedActor.name} attacks ${targetRef.combatant.name} with ${weapon.name}.`;
+    if (damageResolution.source === "rolled" && damageResolution.roll) {
+      message += ` [${damageResolution.roll.formula}=${damageResolution.roll.total}]`;
+    }
+    addLog(game, message, "combat");
+  } else if (actionType === "defend") {
+    refreshedActor.actionUsed = true;
+    refreshedActor.defending = true;
+    usedAction = true;
+    message = `${refreshedActor.name} takes a defensive stance.`;
+    addLog(game, message, "combat");
+  } else if (actionType === "dodge") {
+    refreshedActor.actionUsed = true;
+    refreshedActor.dodging = true;
+    usedAction = true;
+    message = `${refreshedActor.name} focuses on dodging.`;
+    addLog(game, message, "combat");
+  } else if (actionType === "use_skill") {
+    if (!actionArgs.skillId) {
+      return { ok: false, message: "Using a skill requires skillId." };
+    }
+    const skill = getUsableSkill(refreshedActor, actionArgs.skillId);
+    if (!skill) {
+      return {
+        ok: false,
+        message: `${refreshedActor.name} does not have that unlocked skill.`,
+      };
+    }
+    if (refreshedActor.mp < skill.mpCost) {
+      return {
+        ok: false,
+        message: `${refreshedActor.name} does not have enough MP for ${skill.name}.`,
+      };
+    }
+
+    let skillTargetRef = null;
+    if (skill.target === "self") {
+      skillTargetRef = actorRef;
+    } else {
+      if (!actionArgs.targetId) {
+        return { ok: false, message: `${skill.name} requires a targetId.` };
+      }
+      const targetResult = resolveTarget(actionArgs.targetId);
+      if (targetResult.error) {
+        return { ok: false, message: targetResult.error };
+      }
+      skillTargetRef = targetResult.targetRef;
+      const distance = distanceBetweenCombatants(refreshedActor, skillTargetRef.combatant);
+      const skillRange = clamp(Number(skill.range ?? DEFAULT_MELEE_RANGE), 0, MAX_RANGE);
+      if (distance > skillRange) {
+        return {
+          ok: false,
+          message:
+            `${skillTargetRef.combatant.name} is out of skill range. ` +
+            `${skill.name} has range ${skillRange}, distance is ${distance}.`,
+        };
+      }
+      if (skill.target === "enemy" && skillTargetRef.kind === actorRef.kind) {
+        return { ok: false, message: `${skill.name} can only target enemies.` };
+      }
+      if (skill.target === "ally" && skillTargetRef.kind !== actorRef.kind) {
+        return { ok: false, message: `${skill.name} can only target allies.` };
+      }
+    }
+
+    refreshedActor.mp = clamp(refreshedActor.mp - skill.mpCost, 0, refreshedActor.mpMax);
+    refreshedActor.actionUsed = true;
+    usedAction = true;
+    const dealt = applyDamage(skillTargetRef.combatant, actionArgs.damage ?? 0);
+    const healed = applyHealing(skillTargetRef.combatant, actionArgs.heal ?? 0);
+    message = `${refreshedActor.name} uses ${skill.name}${
+      skillTargetRef.combatant.id !== refreshedActor.id
+        ? ` on ${skillTargetRef.combatant.name}`
+        : ""
+    }.`;
+    if (dealt > 0) message += ` ${dealt} damage dealt.`;
+    if (healed > 0) message += ` ${healed} HP restored.`;
+    addLog(game, message, "combat");
+  } else if (actionType === "end_turn") {
+    if (!refreshedActor.actionUsed) {
+      return {
+        ok: false,
+        message: "A turn cannot end before using one action (attack, defend, dodge, or skill).",
+      };
+    }
+    const transition = resolveTurnTransition(game);
+    if (!transition.ok) {
+      return { ok: false, message: transition.message };
+    }
+    message = transition.summary;
+  } else {
+    return { ok: false, message: "Unsupported combat action." };
+  }
+
+  if (usedAction && actorRef.kind === "pc") {
+    const transition = resolveTurnTransition(game);
+    if (!transition.ok) {
+      return { ok: false, message: transition.message };
+    }
+    message = `${message} ${transition.summary}`.trim();
+  }
+
+  syncCombatState(game);
+  const outcome = resolveCombatOutcome(game);
+  if (outcome === "victory") {
+    return { ok: true, message: `${message} Combat ends in victory.`.trim() };
+  }
+  if (outcome === "player_down") {
+    return { ok: true, message: `${message} Combat ends with the player down.`.trim() };
+  }
+  return { ok: true, message };
+}
+
+const weaponInputSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  category: z.enum(["melee", "ranged"]).optional(),
+  range: z.number().int().min(1).max(MAX_RANGE).optional(),
+  equipped: z.boolean().optional(),
+  damageFormula: z.string().optional(),
+});
+
+const skillInputSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  unlockLevel: z.number().int().min(1).max(MAX_LEVEL).optional(),
+  mpCost: z.number().int().min(0).max(99).optional(),
+  range: z.number().int().min(0).max(MAX_RANGE).optional(),
+  target: z.enum(["enemy", "ally", "self"]).optional(),
+  description: z.string().optional(),
+});
+
+const inventoryItemInputSchema = z.object({
+  id: z.string().optional(),
+  name: z.string(),
+  qty: z.number().int().optional(),
+  notes: z.string().optional(),
+  weapon: weaponInputSchema.optional(),
+});
+
 const setupPreferencesSchema = z.object({
   gameId: z.string().optional(),
   genre: z.string().optional(),
   tone: z.string().optional(),
   storyElements: z.union([z.array(z.string()), z.string()]).optional(),
   startingLocation: z.string().optional(),
-  startingInventory: z
-    .array(
-      z.object({
-        name: z.string(),
-        qty: z.number().int().optional(),
-        notes: z.string().optional(),
-      })
-    )
-    .optional(),
+  startingInventory: z.array(inventoryItemInputSchema).optional(),
   hpMax: z.number().int().min(1).max(999).optional(),
   mpMax: z.number().int().min(0).max(999).optional(),
   startingHp: z.number().int().min(0).max(999).optional(),
@@ -559,6 +1570,8 @@ const setupPreferencesSchema = z.object({
       archetype: z.string().optional(),
       background: z.string().optional(),
       goal: z.string().optional(),
+      level: z.number().int().min(1).max(MAX_LEVEL).optional(),
+      skills: z.array(skillInputSchema).optional(),
     })
     .optional(),
 });
@@ -596,17 +1609,21 @@ const updateStateSchema = z.object({
   hp: z.number().int().optional(),
   mp: z.number().int().optional(),
   location: z.string().optional(),
+  skills: z.array(skillInputSchema).optional(),
+  pc: z
+    .object({
+      name: z.string().optional(),
+      pronouns: z.string().optional(),
+      archetype: z.string().optional(),
+      background: z.string().optional(),
+      goal: z.string().optional(),
+      level: z.number().int().min(1).max(MAX_LEVEL).optional(),
+      skills: z.array(skillInputSchema).optional(),
+    })
+    .optional(),
   inventory: z
     .object({
-      add: z
-        .array(
-          z.object({
-            name: z.string(),
-            qty: z.number().int().optional(),
-            notes: z.string().optional(),
-          })
-        )
-        .optional(),
+      add: z.array(inventoryItemInputSchema).optional(),
       remove: z
         .array(
           z.object({
@@ -615,6 +1632,7 @@ const updateStateSchema = z.object({
           })
         )
         .optional(),
+      equipWeaponId: z.string().optional(),
     })
     .optional(),
   combat: z
@@ -630,6 +1648,25 @@ const updateStateSchema = z.object({
       enemyHp: z.number().int().optional(),
       enemyHpMax: z.number().int().optional(),
       enemyIntent: z.string().optional(),
+      pc: z
+        .object({
+          id: z.string().optional(),
+          level: z.number().int().min(1).max(MAX_LEVEL).optional(),
+          position: z.number().int().min(0).max(100).optional(),
+          speed: z.number().int().min(0).max(MAX_RANGE).optional(),
+          movementRemaining: z.number().int().min(0).max(MAX_RANGE).optional(),
+          actionUsed: z.boolean().optional(),
+          defending: z.boolean().optional(),
+          dodging: z.boolean().optional(),
+          equippedWeaponId: z.string().optional(),
+          hp: z.number().int().min(0).max(999).optional(),
+          hpMax: z.number().int().min(1).max(999).optional(),
+          mp: z.number().int().min(0).max(999).optional(),
+          mpMax: z.number().int().min(0).max(999).optional(),
+          weapons: z.array(weaponInputSchema).optional(),
+          skills: z.array(skillInputSchema).optional(),
+        })
+        .optional(),
       enemies: z
         .array(
           z.object({
@@ -640,6 +1677,18 @@ const updateStateSchema = z.object({
             status: z.string().optional(),
             intent: z.string().optional(),
             note: z.string().optional(),
+            mp: z.number().int().min(0).max(999).optional(),
+            mpMax: z.number().int().min(0).max(999).optional(),
+            level: z.number().int().min(1).max(MAX_LEVEL).optional(),
+            position: z.number().int().min(0).max(100).optional(),
+            speed: z.number().int().min(0).max(MAX_RANGE).optional(),
+            movementRemaining: z.number().int().min(0).max(MAX_RANGE).optional(),
+            actionUsed: z.boolean().optional(),
+            defending: z.boolean().optional(),
+            dodging: z.boolean().optional(),
+            equippedWeaponId: z.string().optional(),
+            weapons: z.array(weaponInputSchema).optional(),
+            skills: z.array(skillInputSchema).optional(),
           })
         )
         .optional(),
@@ -657,6 +1706,19 @@ const updateStateSchema = z.object({
     .optional(),
   logEntry: z.string().optional(),
   logKind: z.string().optional(),
+});
+
+const combatActionSchema = z.object({
+  gameId: z.string(),
+  actorId: z.string().optional(),
+  action: z.enum(["attack", "defend", "dodge", "use_skill", "move", "end_turn"]),
+  targetId: z.string().optional(),
+  weaponId: z.string().optional(),
+  skillId: z.string().optional(),
+  damage: z.number().int().min(0).optional(),
+  heal: z.number().int().min(0).optional(),
+  moveBy: z.number().int().optional(),
+  moveTo: z.number().int().min(0).max(100).optional(),
 });
 
 const resetGameSchema = z.object({
@@ -774,19 +1836,23 @@ export function registerRpgTools(server) {
     }
     if (startArgs.pc) {
       game.pc = { ...game.pc, ...startArgs.pc };
+      if (startArgs.pc.level !== undefined) {
+        game.pc.level = clamp(Number(startArgs.pc.level), 1, MAX_LEVEL);
+      }
+      if (startArgs.pc.skills !== undefined) {
+        game.pc.skills = (Array.isArray(startArgs.pc.skills) ? startArgs.pc.skills : [])
+          .map((skill) => normalizeSkill(skill, skill?.name, "skill"))
+          .filter(Boolean);
+      }
     }
     if (startArgs.storyElements !== undefined) {
       game.storyElements = normalizeStoryElements(startArgs.storyElements);
     }
     if (startArgs.startingInventory !== undefined) {
       game.inventory = startArgs.startingInventory
-        .filter((item) => item?.name)
-        .map((item) => ({
-          id: `item_${crypto.randomUUID()}`,
-          name: item.name,
-          qty: clamp(Number(item.qty ?? 1), 1, 999),
-          notes: item.notes ?? "",
-        }));
+        .map((item) => normalizeInventoryItem(item))
+        .filter(Boolean);
+      syncInventoryWeaponEquipFlags(game.inventory);
     }
 
     const desiredHpMax = startArgs.hpMax ?? game.hp.max;
@@ -825,7 +1891,7 @@ export function registerRpgTools(server) {
     game.phase = game.setupComplete ? "exploration" : "setup";
 
     if (game.setupComplete && !game.location) {
-      game.location = "Unknown frontier";
+      game.location = "Unknown location";
     }
 
     persistGame(game);
@@ -1079,6 +2145,39 @@ export function registerRpgTools(server) {
         return replyWithError("Game not found. Start a new game first.");
       }
 
+      if (args?.pc) {
+        game.pc = { ...game.pc, ...args.pc };
+        if (args.pc.level !== undefined) {
+          game.pc.level = clamp(Number(args.pc.level), 1, MAX_LEVEL);
+        }
+      }
+      const incomingSkills = args?.skills ?? args?.pc?.skills;
+      if (incomingSkills !== undefined) {
+        game.pc.skills = (Array.isArray(incomingSkills) ? incomingSkills : [])
+          .map((skill) => normalizeSkill(skill, skill?.name, "skill"))
+          .filter(Boolean);
+      }
+
+      const combatUpdate = args?.combat
+        ? { ...args.combat }
+        : null;
+      const inActiveCombat = game.phase === "combat" && Boolean(game.combat);
+      const hasHpMutation =
+        args?.hp !== undefined ||
+        args?.hpDelta !== undefined ||
+        args?.mp !== undefined ||
+        args?.mpDelta !== undefined ||
+        combatUpdate?.pcHp !== undefined ||
+        combatUpdate?.pcHpDelta !== undefined ||
+        combatUpdate?.pcMp !== undefined ||
+        combatUpdate?.pcMpDelta !== undefined;
+      const mutatesCombatState = Boolean(combatUpdate && combatUpdate.active !== false);
+      if (inActiveCombat && (hasHpMutation || mutatesCombatState)) {
+        return replyWithError(
+          "Active combat is rule-locked. Use combat_action for attacks, skills, movement, and turn flow."
+        );
+      }
+
       if (args?.hp !== undefined) {
         game.hp.current = clamp(Number(args.hp), 0, game.hp.max);
       }
@@ -1096,9 +2195,9 @@ export function registerRpgTools(server) {
       }
 
       applyInventoryDelta(game, args?.inventory);
-      const combatUpdate = args?.combat
-        ? { ...args.combat }
-        : null;
+      if (args?.inventory?.equipWeaponId) {
+        syncInventoryWeaponEquipFlags(game.inventory, args.inventory.equipWeaponId);
+      }
       if (combatUpdate) {
         const hasTopLevelHp =
           args?.hp !== undefined || args?.hpDelta !== undefined;
@@ -1114,6 +2213,7 @@ export function registerRpgTools(server) {
         }
       }
       applyCombatUpdate(game, combatUpdate);
+      syncCombatState(game);
 
       if (args?.logEntry) {
         addLog(game, args.logEntry, args.logKind ?? "story");
@@ -1121,6 +2221,34 @@ export function registerRpgTools(server) {
 
       persistGame(game);
       return replyWithState(game, "Game state updated.");
+    }
+  );
+
+  server.registerTool(
+    "combat_action",
+    {
+      title: "Resolve combat action",
+      description:
+        "Execute one combat turn action with rules enforcement (equipped weapon, range, skills, and one action per turn). Player action turns auto-advance and enemy turns auto-resolve.",
+      inputSchema: combatActionSchema,
+      _meta: {
+        ...commonToolMeta,
+        "openai/toolInvocation/invoking": "Resolving combat action",
+        "openai/toolInvocation/invoked": "Combat action resolved",
+      },
+    },
+    async (args) => {
+      const game = getGame(args?.gameId);
+      if (!game) {
+        return replyWithError("Game not found. Start a new game first.");
+      }
+      const result = resolveCombatAction(game, args);
+      if (!result.ok) {
+        persistGame(game);
+        return replyWithError(result.message);
+      }
+      persistGame(game);
+      return replyWithState(game, result.message);
     }
   );
 
