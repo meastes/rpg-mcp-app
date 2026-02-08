@@ -89,7 +89,14 @@ type GameState = {
     background?: string;
     goal?: string;
   };
-  stats?: { str: number; agi: number; int: number; cha: number };
+  stats?: {
+    str: number;
+    agi: number;
+    con: number;
+    int: number;
+    wis: number;
+    cha: number;
+  };
   hp?: { current: number; max: number };
   mp?: { current: number; max: number };
   inventory?: InventoryItem[];
@@ -364,9 +371,9 @@ export function App() {
   const stats: Record<StatKey, number | undefined> = {
     STR: game.stats?.str,
     DEX: game.stats?.agi,
-    CON: undefined,
+    CON: game.stats?.con,
     INT: game.stats?.int,
-    WIS: undefined,
+    WIS: game.stats?.wis,
     CHA: game.stats?.cha,
   };
 

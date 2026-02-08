@@ -17,7 +17,7 @@ const mockState = {
     background: "Former guild envoy",
     goal: "Find the atlas of storms",
   },
-  stats: { str: 2, agi: 3, int: 4, cha: 2 },
+  stats: { str: 15, agi: 14, con: 13, int: 12, wis: 10, cha: 8 },
   hp: { current: 9, max: 12 },
   mp: { current: 4, max: 6 },
   inventory: [
@@ -152,7 +152,7 @@ export const MinimalState: Story = {
       tone: "",
       storyElements: [],
       pc: { name: "", archetype: "" },
-      stats: { str: 2, agi: 2, int: 2, cha: 2 },
+      stats: { str: 10, agi: 10, con: 10, int: 10, wis: 10, cha: 10 },
       hp: { current: 10, max: 12 },
       mp: { current: 0, max: 0 },
       inventory: [],

@@ -16,12 +16,13 @@ const commonToolMeta = {
 };
 const GAME_GUIDE_RESOURCE = "rpg://guide";
 const SETUP_SESSION_TTL_MS = 30 * 60 * 1000;
-const REQUIRED_SETUP_CHOICES = [
+const BASE_REQUIRED_SETUP_CHOICES = [
   "genre",
   "pc.name",
   "pc.archetype",
   "startingLocation",
 ];
+const GUIDED_ONLY_REQUIRED_SETUP_CHOICES = ["stats"];
 const GAME_GUIDE_SUMMARY =
   "Read the guide, pick genre/tone, starting location, and core character details, then confirm setup before starting.";
 const DEFAULT_GENRES = [
@@ -77,7 +78,16 @@ Remember: these are guidelines. Adjust to fit your table.`;
 const games = new Map();
 const setupSessions = new Map();
 
-const baseStats = { str: 2, agi: 2, int: 2, cha: 2 };
+const STAT_KEYS = Object.freeze(["str", "agi", "con", "int", "wis", "cha"]);
+const STANDARD_ARRAY = Object.freeze([15, 14, 13, 12, 10, 8]);
+const baseStats = Object.freeze({
+  str: 15,
+  agi: 14,
+  con: 13,
+  int: 12,
+  wis: 10,
+  cha: 8,
+});
 const DEFAULT_MELEE_RANGE = 1;
 const DEFAULT_MOVE_SPEED = 6;
 const MAX_RANGE = 30;
@@ -110,6 +120,50 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizeStats(rawStats = {}, fallbackStats = baseStats) {
+  const normalized = {};
+  STAT_KEYS.forEach((key) => {
+    const rawValue = Number(rawStats?.[key]);
+    const fallbackValue = Number(fallbackStats?.[key]);
+    const resolved = Number.isFinite(rawValue)
+      ? rawValue
+      : Number.isFinite(fallbackValue)
+        ? fallbackValue
+        : 10;
+    normalized[key] = clamp(resolved, 1, 20);
+  });
+  return normalized;
+}
+
+function buildStartingStats(statFocus) {
+  const values = [...STANDARD_ARRAY];
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = crypto.randomInt(0, index + 1);
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+  }
+
+  const randomized = {};
+  STAT_KEYS.forEach((key, index) => {
+    randomized[key] = values[index] ?? baseStats[key];
+  });
+
+  if (!statFocus || !Object.prototype.hasOwnProperty.call(randomized, statFocus)) {
+    return randomized;
+  }
+
+  const highestKey = STAT_KEYS.reduce(
+    (bestKey, key) => (randomized[key] > randomized[bestKey] ? key : bestKey),
+    STAT_KEYS[0]
+  );
+  if (highestKey !== statFocus) {
+    [randomized[highestKey], randomized[statFocus]] = [
+      randomized[statFocus],
+      randomized[highestKey],
+    ];
+  }
+  return withStatFocus(randomized, statFocus);
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -132,6 +186,23 @@ function mergeSetupArgs(base = {}, patch = {}) {
       ...(patch.pc ?? {}),
     },
   };
+}
+
+function isCompleteStatsObject(stats) {
+  if (!stats || typeof stats !== "object") return false;
+  return STAT_KEYS.every((key) => Number.isFinite(Number(stats[key])));
+}
+
+function isGuideAlignedStartingStats(stats) {
+  if (!isCompleteStatsObject(stats)) return false;
+  const values = STAT_KEYS.map((key) => Number(stats[key]));
+  return values.every((value) => Number.isInteger(value) && value >= 8 && value <= 15);
+}
+
+function getRequiredSetupChoices(mode = "guided") {
+  return mode === "guided"
+    ? [...BASE_REQUIRED_SETUP_CHOICES, ...GUIDED_ONLY_REQUIRED_SETUP_CHOICES]
+    : [...BASE_REQUIRED_SETUP_CHOICES];
 }
 
 function pickRandom(list, fallback) {
@@ -158,7 +229,7 @@ function applySetupDefaults(args = {}) {
   return merged;
 }
 
-function missingSetupChoices(args = {}) {
+function missingSetupChoices(args = {}, mode = "guided") {
   const missing = [];
   if (!args.genre) missing.push("genre");
   if (!args.pc?.name) missing.push("pc.name");
@@ -166,15 +237,32 @@ function missingSetupChoices(args = {}) {
   if (!String(args.startingLocation ?? "").trim()) {
     missing.push("startingLocation");
   }
+  if (mode === "guided" && !isCompleteStatsObject(args.stats)) {
+    missing.push("stats");
+  }
   return missing;
 }
 
-function beginSetupSession(gameId, startArgs = {}) {
+function invalidSetupChoices(args = {}, mode = "guided") {
+  const invalid = [];
+  if (
+    mode === "guided" &&
+    isCompleteStatsObject(args.stats) &&
+    !isGuideAlignedStartingStats(args.stats)
+  ) {
+    invalid.push("stats");
+  }
+  return invalid;
+}
+
+function beginSetupSession(gameId, startArgs = {}, mode = "guided") {
   purgeExpiredSetupSessions();
   const setupId = `setup_${crypto.randomUUID()}`;
+  const resolvedMode = mode === "auto" ? "auto" : "guided";
   setupSessions.set(setupId, {
     setupId,
     gameId,
+    mode: resolvedMode,
     issuedAt: Date.now(),
     expiresAt: Date.now() + SETUP_SESSION_TTL_MS,
     confirmed: false,
@@ -200,13 +288,21 @@ function confirmSetupSession(setupId, patchArgs = {}) {
   }
 
   session.startArgs = mergeSetupArgs(session.startArgs, patchArgs);
-  const missing = missingSetupChoices(session.startArgs);
-  if (missing.length > 0) {
+  const missing = missingSetupChoices(session.startArgs, session.mode);
+  const invalid = invalidSetupChoices(session.startArgs, session.mode);
+  if (missing.length > 0 || invalid.length > 0) {
+    const messageParts = [];
+    if (missing.length > 0) messageParts.push(`missing ${missing.join(", ")}`);
+    if (invalid.length > 0) {
+      messageParts.push(
+        `invalid ${invalid.join(", ")} (guided stats must be integers in the 8-15 range)`
+      );
+    }
     return {
       ok: false,
-      message:
-        `Setup still needs ${missing.join(", ")}.`,
+      message: `Setup still needs ${messageParts.join("; ")}.`,
       missingChoices: missing,
+      invalidChoices: invalid,
       session,
     };
   }
@@ -241,7 +337,12 @@ function consumeConfirmedSetupSession(setupId, requestedGameId) {
   }
 
   setupSessions.delete(setupId);
-  return { ok: true, gameId: session.gameId, startArgs: session.startArgs };
+  return {
+    ok: true,
+    gameId: session.gameId,
+    mode: session.mode,
+    startArgs: session.startArgs,
+  };
 }
 
 function createGameState(overrides = {}) {
@@ -271,7 +372,7 @@ function createGameState(overrides = {}) {
             .filter(Boolean)
         : [],
     },
-    stats: { ...baseStats },
+    stats: normalizeStats(overrides.stats ?? buildStartingStats(overrides.statFocus)),
     hp: { current: hpMax, max: hpMax },
     mp: { current: mpMax, max: mpMax },
     inventory: overrides.inventory ?? [],
@@ -287,7 +388,7 @@ function withStatFocus(stats, focus) {
     return stats;
   }
 
-  return { ...stats, [focus]: clamp(stats[focus] + 1, 1, 5) };
+  return { ...stats, [focus]: clamp(stats[focus] + 1, 1, 20) };
 }
 
 function getGame(gameId) {
@@ -356,7 +457,7 @@ function summarizeState(game, { imageRequest } = {}) {
     tone: game.tone,
     storyElements: game.storyElements,
     pc: game.pc,
-    stats: game.stats,
+    stats: normalizeStats(game.stats),
     hp: game.hp,
     mp: game.mp,
     inventory: game.inventory,
@@ -1642,7 +1743,17 @@ const setupPreferencesSchema = z.object({
   mpMax: z.number().int().min(0).max(999).optional(),
   startingHp: z.number().int().min(0).max(999).optional(),
   startingMp: z.number().int().min(0).max(999).optional(),
-  statFocus: z.enum(["str", "agi", "int", "cha"]).optional(),
+  statFocus: z.enum(["str", "agi", "con", "int", "wis", "cha"]).optional(),
+  stats: z
+    .object({
+      str: z.number().int().min(1).max(20),
+      agi: z.number().int().min(1).max(20),
+      con: z.number().int().min(1).max(20),
+      int: z.number().int().min(1).max(20),
+      wis: z.number().int().min(1).max(20),
+      cha: z.number().int().min(1).max(20),
+    })
+    .optional(),
   pc: z
     .object({
       name: z.string().optional(),
@@ -1844,25 +1955,32 @@ export function registerRpgTools(server) {
   };
 
   const formatSetupContent = (session, phase) => {
-    const missingChoices = missingSetupChoices(session.startArgs);
+    const missingChoices = missingSetupChoices(session.startArgs, session.mode);
+    const invalidChoices = invalidSetupChoices(session.startArgs, session.mode);
     return {
       type: "ttrpg_setup",
       phase,
       setupId: session.setupId,
       gameId: session.gameId,
+      mode: session.mode,
       guideResourceUri: GAME_GUIDE_RESOURCE,
       guideSummary: GAME_GUIDE_SUMMARY,
       guide: GAME_GUIDE_TEXT,
-      requiredChoices: REQUIRED_SETUP_CHOICES,
+      requiredChoices: getRequiredSetupChoices(session.mode),
       missingChoices,
+      invalidChoices,
       providedChoices: {
         genre: session.startArgs.genre ?? "",
         tone: session.startArgs.tone ?? "",
         startingLocation: session.startArgs.startingLocation ?? "",
+        stats: session.startArgs.stats ?? null,
         pc: session.startArgs.pc ?? {},
       },
-      nextTool: missingChoices.length ? "confirm_setup" : "start_game",
-      startGameArgsTemplate: missingChoices.length
+      nextTool:
+        missingChoices.length > 0 || invalidChoices.length > 0
+          ? "confirm_setup"
+          : "start_game",
+      startGameArgsTemplate: missingChoices.length > 0 || invalidChoices.length > 0
         ? null
         : {
             ...session.startArgs,
@@ -1877,6 +1995,7 @@ export function registerRpgTools(server) {
     let existing = getGame(requestedGameId);
     let effectiveGameId = requestedGameId;
     let setupDefaults = {};
+    let setupMode = "auto";
 
     if (!existing) {
       if (!args?.setupId) {
@@ -1902,15 +2021,22 @@ export function registerRpgTools(server) {
         return replyWithError(setupResult.message);
       }
       effectiveGameId = setupResult.gameId;
+      setupMode = setupResult.mode ?? "auto";
       setupDefaults = setupResult.startArgs ?? {};
       existing = getGame(effectiveGameId);
     }
 
     const startArgs = mergeSetupArgs(setupDefaults, args ?? {});
     startArgs.gameId = effectiveGameId;
-    const game = existing ?? createGameState({ gameId: effectiveGameId });
+    const hasExplicitStartingStats = isCompleteStatsObject(startArgs.stats);
+    const game = existing ?? createGameState({
+      gameId: effectiveGameId,
+      statFocus: startArgs.statFocus,
+      stats: hasExplicitStartingStats ? startArgs.stats : undefined,
+    });
     const previousLocation = String(game.location ?? "").trim();
     const previousSetupComplete = Boolean(game.setupComplete);
+    game.stats = normalizeStats(game.stats);
 
     if (startArgs.genre !== undefined) game.genre = startArgs.genre.trim();
     if (startArgs.tone !== undefined) game.tone = startArgs.tone.trim();
@@ -1930,6 +2056,9 @@ export function registerRpgTools(server) {
     }
     if (startArgs.storyElements !== undefined) {
       game.storyElements = normalizeStoryElements(startArgs.storyElements);
+    }
+    if (hasExplicitStartingStats) {
+      game.stats = normalizeStats(startArgs.stats, game.stats);
     }
     if (startArgs.startingInventory !== undefined) {
       game.inventory = startArgs.startingInventory
@@ -1965,23 +2094,21 @@ export function registerRpgTools(server) {
       }
     }
 
-    if (!existing && startArgs.statFocus) {
-      game.stats = withStatFocus(game.stats, startArgs.statFocus);
-    }
-
     const missing = missingSetupChoices({
       genre: game.genre,
+      stats: game.stats,
       pc: game.pc,
       startingLocation: game.location,
-    });
-    game.setupComplete = missing.length === 0;
+    }, setupMode);
+    const invalid = invalidSetupChoices({ stats: game.stats }, setupMode);
+    game.setupComplete = missing.length === 0 && invalid.length === 0;
     game.phase = game.setupComplete ? "exploration" : "setup";
 
     persistGame(game);
 
     const message = game.setupComplete
       ? `Game ready. ${game.pc.name} enters the story.`
-      : `Setup needs ${missing.join(", ")}.`;
+      : `Setup needs ${[...missing, ...invalid].join(", ")}.`;
     const movedToNewLocation =
       game.setupComplete &&
       String(game.location ?? "").trim() !== previousLocation;
@@ -2021,16 +2148,18 @@ export function registerRpgTools(server) {
       const gameId = args?.gameId?.trim() || `game_${crypto.randomUUID()}`;
       const rawSetupArgs = stripSetupControlFields(args ?? {});
       const setupArgs = mode === "auto" ? applySetupDefaults(rawSetupArgs) : rawSetupArgs;
-      const session = beginSetupSession(gameId, setupArgs);
-      const missingChoices = missingSetupChoices(session.startArgs);
+      const session = beginSetupSession(gameId, setupArgs, mode);
+      const missingChoices = missingSetupChoices(session.startArgs, session.mode);
+      const invalidChoices = invalidSetupChoices(session.startArgs, session.mode);
 
-      if (mode === "guided" && missingChoices.length > 0) {
+      if (mode === "guided" && (missingChoices.length > 0 || invalidChoices.length > 0)) {
+        const needs = [...missingChoices, ...invalidChoices];
         return {
           content: [
             {
               type: "text",
               text:
-                `Setup started. Missing ${missingChoices.join(", ")}. ` +
+                `Setup started. Missing/invalid ${needs.join(", ")}. ` +
                 "Review the guide and call confirm_setup with the setupId and remaining choices.",
             },
           ],
@@ -2071,16 +2200,18 @@ export function registerRpgTools(server) {
     async (args) => {
       const gameId = args?.gameId?.trim() || `game_${crypto.randomUUID()}`;
       const setupArgs = stripSetupControlFields(args ?? {});
-      const session = beginSetupSession(gameId, setupArgs);
-      const missingChoices = missingSetupChoices(session.startArgs);
+      const session = beginSetupSession(gameId, setupArgs, "guided");
+      const missingChoices = missingSetupChoices(session.startArgs, session.mode);
+      const invalidChoices = invalidSetupChoices(session.startArgs, session.mode);
+      const needs = [...missingChoices, ...invalidChoices];
 
       return {
         content: [
           {
             type: "text",
             text:
-              missingChoices.length > 0
-                ? `Setup started. Missing ${missingChoices.join(", ")}. Call confirm_setup next.`
+              needs.length > 0
+                ? `Setup started. Missing/invalid ${needs.join(", ")}. Call confirm_setup next.`
                 : "Setup started with all required choices. Call confirm_setup to finalize.",
           },
         ],
