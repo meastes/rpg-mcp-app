@@ -27,6 +27,28 @@ node server.js
 
 Server runs at `http://localhost:8787/mcp` by default.
 
+## Supabase persistence (optional)
+
+To sync game state to Supabase, configure these environment variables:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (server-side key)
+- `SUPABASE_SCHEMA` (optional, defaults to `public`)
+- `SUPABASE_GAMES_TABLE` (optional, defaults to `rpg_games`)
+
+Create a table similar to:
+
+```sql
+create table if not exists public.rpg_games (
+  game_id text primary key,
+  state jsonb not null,
+  updated_at timestamptz not null default now()
+);
+```
+
+When configured, the MCP server loads game state from Supabase on demand and
+upserts updates on every state change.
+
 ## Connect to ChatGPT (developer mode)
 
 1. Enable developer mode in ChatGPT.

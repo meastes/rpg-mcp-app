@@ -5,6 +5,11 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  isPersistenceEnabled,
+  loadGameState,
+  saveGameState,
+} from "./persistence.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -391,14 +396,25 @@ function withStatFocus(stats, focus) {
   return { ...stats, [focus]: clamp(stats[focus] + 1, 1, 20) };
 }
 
-function getGame(gameId) {
+async function getGame(gameId) {
   if (!gameId) return null;
-  return games.get(gameId) ?? null;
+  const cached = games.get(gameId);
+  if (cached) return cached;
+  const persisted = await loadGameState(gameId);
+  if (!persisted) return null;
+  games.set(gameId, persisted);
+  return persisted;
 }
 
-function persistGame(game) {
+async function persistGame(game) {
   game.updatedAt = nowIso();
   games.set(game.gameId, game);
+  if (isPersistenceEnabled()) {
+    const result = await saveGameState(game);
+    if (!result.ok) {
+      console.error("Failed to persist game state to Supabase.");
+    }
+  }
   return game;
 }
 
@@ -1990,9 +2006,9 @@ export function registerRpgTools(server) {
     };
   };
 
-  const runStartGame = (args) => {
+  const runStartGame = async (args) => {
     const requestedGameId = args?.gameId?.trim();
-    let existing = getGame(requestedGameId);
+    let existing = await getGame(requestedGameId);
     let effectiveGameId = requestedGameId;
     let setupDefaults = {};
     let setupMode = "auto";
@@ -2023,7 +2039,7 @@ export function registerRpgTools(server) {
       effectiveGameId = setupResult.gameId;
       setupMode = setupResult.mode ?? "auto";
       setupDefaults = setupResult.startArgs ?? {};
-      existing = getGame(effectiveGameId);
+      existing = await getGame(effectiveGameId);
     }
 
     const startArgs = mergeSetupArgs(setupDefaults, args ?? {});
@@ -2104,7 +2120,7 @@ export function registerRpgTools(server) {
     game.setupComplete = missing.length === 0 && invalid.length === 0;
     game.phase = game.setupComplete ? "exploration" : "setup";
 
-    persistGame(game);
+    await persistGame(game);
 
     const message = game.setupComplete
       ? `Game ready. ${game.pc.name} enters the story.`
@@ -2172,7 +2188,7 @@ export function registerRpgTools(server) {
         return replyWithError(confirmResult.message);
       }
 
-      return runStartGame({
+      return await runStartGame({
         ...session.startArgs,
         gameId: session.gameId,
         setupId: session.setupId,
@@ -2282,7 +2298,7 @@ export function registerRpgTools(server) {
         "openai/toolInvocation/invoked": "Adventure setup updated",
       },
     },
-    async (args) => runStartGame(args)
+    async (args) => await runStartGame(args)
   );
 
   server.registerTool(
@@ -2298,7 +2314,7 @@ export function registerRpgTools(server) {
       },
     },
     async (args) => {
-      const game = getGame(args?.gameId);
+      const game = await getGame(args?.gameId);
       if (!game) {
         return replyWithError("Game not found. Start a new game first.");
       }
@@ -2319,7 +2335,7 @@ export function registerRpgTools(server) {
       },
     },
     async (args) => {
-      const game = getGame(args?.gameId);
+      const game = await getGame(args?.gameId);
       if (!game) {
         return replyWithError("Game not found. Start a new game first.");
       }
@@ -2343,7 +2359,7 @@ export function registerRpgTools(server) {
         "roll"
       );
 
-      persistGame(game);
+      await persistGame(game);
       return replyWithState(
         game,
         `Rolled ${result.formula}: ${result.total}.`
@@ -2365,7 +2381,7 @@ export function registerRpgTools(server) {
       },
     },
     async (args) => {
-      const game = getGame(args?.gameId);
+      const game = await getGame(args?.gameId);
       if (!game) {
         return replyWithError("Game not found. Start a new game first.");
       }
@@ -2445,7 +2461,7 @@ export function registerRpgTools(server) {
         addLog(game, args.logEntry, args.logKind ?? "story");
       }
 
-      persistGame(game);
+      await persistGame(game);
       const movedToNewLocation =
         args?.location !== undefined &&
         game.setupComplete &&
@@ -2471,16 +2487,16 @@ export function registerRpgTools(server) {
       },
     },
     async (args) => {
-      const game = getGame(args?.gameId);
+      const game = await getGame(args?.gameId);
       if (!game) {
         return replyWithError("Game not found. Start a new game first.");
       }
       const result = resolveCombatAction(game, args);
       if (!result.ok) {
-        persistGame(game);
+        await persistGame(game);
         return replyWithError(result.message);
       }
-      persistGame(game);
+      await persistGame(game);
       return replyWithState(game, result.message);
     }
   );
@@ -2498,7 +2514,7 @@ export function registerRpgTools(server) {
       },
     },
     async (args) => {
-      const existing = getGame(args?.gameId);
+      const existing = await getGame(args?.gameId);
       if (!existing) {
         return replyWithError("Game not found. Start a new game first.");
       }
@@ -2510,7 +2526,7 @@ export function registerRpgTools(server) {
         pc: existing.pc,
       });
 
-      persistGame(reset);
+      await persistGame(reset);
       return replyWithState(reset, "Game reset.");
     }
   );
