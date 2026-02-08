@@ -34,9 +34,21 @@ const mockState = {
 };
 
 type MockState = typeof mockState;
+type MockImageRequest = {
+  type?: string;
+  gameId?: string;
+  trigger?: string;
+  location?: string;
+  prompt?: string;
+  requestedAt?: string;
+} | null;
+
+type StoryState = MockState & {
+  imageRequest?: MockImageRequest;
+};
 
 type WrapperProps = {
-  state: MockState | null;
+  state: StoryState | null;
 };
 
 function StateWrapper({ state }: WrapperProps) {
@@ -69,7 +81,18 @@ type Story = StoryObj<typeof StateWrapper>;
 
 export const Exploration: Story = {
   args: {
-    state: mockState,
+    state: {
+      ...mockState,
+      imageRequest: {
+        type: "location_image",
+        gameId: mockState.gameId,
+        trigger: "location_update",
+        location: mockState.location,
+        prompt:
+          "A cinematic fantasy harbor at dusk, brass lanterns reflecting in wet cobblestones, storm clouds gathering over distant ships.",
+        requestedAt: "2026-02-08T10:00:00.000Z",
+      },
+    },
   },
 };
 

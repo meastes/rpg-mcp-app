@@ -17,6 +17,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
@@ -218,6 +219,62 @@ function ResourceMeter({
   );
 }
 
+function LoadingPanel() {
+  return (
+    <div className="relative mx-auto w-full max-w-2xl px-3 pb-4 pt-3 sm:px-4 sm:pt-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.17),transparent_66%)]" />
+      <Card className="overflow-hidden rounded-2xl border-border/75 bg-card/80 shadow-lg backdrop-blur">
+        <CardHeader className="space-y-4 p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-8 w-44 bg-secondary/50" />
+              <Skeleton className="h-4 w-56 bg-secondary/50" />
+            </div>
+            <Skeleton className="h-6 w-24 rounded-full bg-secondary/50" />
+          </div>
+          <Skeleton className="h-8 w-44 bg-secondary/50" />
+        </CardHeader>
+
+        <Separator />
+
+        <CardContent className="p-4 sm:p-5">
+          <div className="grid h-auto w-full grid-cols-3 gap-1 rounded-lg border border-border/70 bg-background/20 p-1">
+            <Skeleton className="h-8 bg-secondary/50" />
+            <Skeleton className="h-8 bg-secondary/50" />
+            <Skeleton className="h-8 bg-secondary/50" />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="rounded-lg border bg-card/60 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-7 w-7 bg-secondary/50" />
+                  <Skeleton className="h-4 w-14 bg-secondary/50" />
+                </div>
+                <Skeleton className="h-4 w-14 bg-secondary/50" />
+              </div>
+              <Skeleton className="mt-2 h-1.5 w-full bg-secondary/50" />
+              <Skeleton className="mt-2 h-3 w-32 bg-secondary/50" />
+            </div>
+
+            <div className="rounded-lg border bg-card/60 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-7 w-7 bg-secondary/50" />
+                  <Skeleton className="h-4 w-14 bg-secondary/50" />
+                </div>
+                <Skeleton className="h-4 w-14 bg-secondary/50" />
+              </div>
+              <Skeleton className="mt-2 h-1.5 w-full bg-secondary/50" />
+              <Skeleton className="mt-2 h-3 w-44 bg-secondary/50" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function formatStatValue(value?: number) {
   if (value === undefined || value === null || Number.isNaN(value)) return "--";
   return value;
@@ -265,6 +322,7 @@ export function App() {
     }
     return null;
   }, [toolOutput]);
+  const isLoading = toolOutput === null;
   const imageRequest = game?.imageRequest ?? null;
 
   useEffect(() => {
@@ -286,6 +344,9 @@ export function App() {
   );
 
   if (!game) {
+    if (isLoading) {
+      return <LoadingPanel />;
+    }
     return null;
   }
 
@@ -422,7 +483,7 @@ export function App() {
                       className="gap-2 border border-border/90"
                     >
                       <Wand2 className="h-3.5 w-3.5" />
-                      {followUpState === "copied" ? "Prompt copied" : "Generate location image"}
+                      {followUpState === "copied" ? "Prompt copied" : "Copy location image prompt"}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs whitespace-normal sm:max-w-sm">
