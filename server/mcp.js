@@ -16,9 +16,14 @@ const commonToolMeta = {
 };
 const GAME_GUIDE_RESOURCE = "rpg://guide";
 const SETUP_SESSION_TTL_MS = 30 * 60 * 1000;
-const REQUIRED_SETUP_CHOICES = ["genre", "pc.name", "pc.archetype"];
+const REQUIRED_SETUP_CHOICES = [
+  "genre",
+  "pc.name",
+  "pc.archetype",
+  "startingLocation",
+];
 const GAME_GUIDE_SUMMARY =
-  "Read the guide, pick genre/tone and core character details, then confirm setup before starting.";
+  "Read the guide, pick genre/tone, starting location, and core character details, then confirm setup before starting.";
 const DEFAULT_GENRES = [
   "Adventure",
   "Mystery",
@@ -27,6 +32,13 @@ const DEFAULT_GENRES = [
 const DEFAULT_TONES = ["Cinematic", "Grounded", "Gritty"];
 const DEFAULT_ARCHETYPES = ["Specialist", "Guardian", "Scout", "Scholar", "Wildcard"];
 const DEFAULT_PC_NAMES = ["Rowan", "Kestrel", "Iris", "Thorn", "Ash"];
+const DEFAULT_STARTING_LOCATIONS = [
+  "The Rusted Causeway",
+  "Old Harbor Market",
+  "Sunken Observatory",
+  "Ashwind Rail Yard",
+  "Glass Dunes Outpost",
+];
 const GAME_GUIDE_TEXT = `TTRPG Game Guide (general, system-agnostic)
 
 Core loop:
@@ -132,6 +144,12 @@ function applySetupDefaults(args = {}) {
   const merged = mergeSetupArgs({}, args);
   if (!merged.genre) merged.genre = pickRandom(DEFAULT_GENRES, "Adventure");
   if (!merged.tone) merged.tone = pickRandom(DEFAULT_TONES, "Cinematic");
+  if (!merged.startingLocation) {
+    merged.startingLocation = pickRandom(
+      DEFAULT_STARTING_LOCATIONS,
+      "Old Harbor Market"
+    );
+  }
   merged.pc = merged.pc ?? {};
   if (!merged.pc.name) merged.pc.name = pickRandom(DEFAULT_PC_NAMES, "Traveler");
   if (!merged.pc.archetype) {
@@ -145,6 +163,9 @@ function missingSetupChoices(args = {}) {
   if (!args.genre) missing.push("genre");
   if (!args.pc?.name) missing.push("pc.name");
   if (!args.pc?.archetype) missing.push("pc.archetype");
+  if (!String(args.startingLocation ?? "").trim()) {
+    missing.push("startingLocation");
+  }
   return missing;
 }
 
@@ -280,8 +301,53 @@ function persistGame(game) {
   return game;
 }
 
-function summarizeState(game) {
+function sanitizeImageTheme(rawTheme) {
+  const sanitized = String(rawTheme ?? "")
+    .replace(
+      /\b(tabletop|ttrpg|rpg|mmorpg|jrpg|video\s*game|videogame|gameplay|hud|ui|screenshot)\b/gi,
+      ""
+    )
+    .replace(/[,:;]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return sanitized || "Adventure";
+}
+
+function buildLocationImageRequest(game, trigger = "location_change") {
+  const location = String(game?.location ?? "").trim() || "Unknown location";
+  const theme = sanitizeImageTheme(game?.genre);
+  const tone = String(game?.tone ?? "").trim() || "Cinematic";
+  const storyHints = normalizeStoryElements(game?.storyElements).slice(0, 3);
+  const hintText = storyHints.length
+    ? ` Include subtle environmental hints of ${storyHints.join(", ")}.`
+    : "";
   return {
+    type: "location_image_request",
+    gameId: game?.gameId ?? "",
+    trigger,
+    location,
+    prompt:
+      `Atmospheric environmental illustration. Theme: ${theme}. Tone: ${tone.toLowerCase()}. ` +
+      `Establishing wide shot of ${location}. ` +
+      "2D illustrated scene, cinematic but understated, high detail, rich atmosphere and believable lighting. " +
+      "No foreground characters, no title text, no logos, no typography, no poster composition, no watermark. " +
+      "No UI, no HUD, not a video game screenshot, not a 3D game render. " +
+      hintText,
+    requestedAt: nowIso(),
+  };
+}
+
+function buildLocationImageInstructionText(imageRequest) {
+  if (!imageRequest) return "";
+  return (
+    "Prompt-only mode: provide one polished image prompt for an external image generator and do not claim an image was generated here. " +
+    `Location: ${imageRequest.location}. ` +
+    `Prompt seed: ${imageRequest.prompt}`
+  );
+}
+
+function summarizeState(game, { imageRequest } = {}) {
+  const base = {
     type: "ttrpg_state",
     gameId: game.gameId,
     phase: game.phase,
@@ -300,12 +366,26 @@ function summarizeState(game) {
     log: game.log.slice(-12),
     updatedAt: game.updatedAt,
   };
+  if (imageRequest) {
+    base.imageRequest = imageRequest;
+  }
+  return base;
 }
 
-function replyWithState(game, message) {
+function replyWithState(game, message, { imageRequest } = {}) {
+  const content = [];
+  if (message) {
+    content.push({ type: "text", text: message });
+  }
+  if (imageRequest) {
+    content.push({
+      type: "text",
+      text: buildLocationImageInstructionText(imageRequest),
+    });
+  }
   return {
-    content: message ? [{ type: "text", text: message }] : [],
-    structuredContent: summarizeState(game),
+    content,
+    structuredContent: summarizeState(game, { imageRequest }),
   };
 }
 
@@ -1778,6 +1858,7 @@ export function registerRpgTools(server) {
       providedChoices: {
         genre: session.startArgs.genre ?? "",
         tone: session.startArgs.tone ?? "",
+        startingLocation: session.startArgs.startingLocation ?? "",
         pc: session.startArgs.pc ?? {},
       },
       nextTool: missingChoices.length ? "confirm_setup" : "start_game",
@@ -1828,6 +1909,8 @@ export function registerRpgTools(server) {
     const startArgs = mergeSetupArgs(setupDefaults, args ?? {});
     startArgs.gameId = effectiveGameId;
     const game = existing ?? createGameState({ gameId: effectiveGameId });
+    const previousLocation = String(game.location ?? "").trim();
+    const previousSetupComplete = Boolean(game.setupComplete);
 
     if (startArgs.genre !== undefined) game.genre = startArgs.genre.trim();
     if (startArgs.tone !== undefined) game.tone = startArgs.tone.trim();
@@ -1886,21 +1969,32 @@ export function registerRpgTools(server) {
       game.stats = withStatFocus(game.stats, startArgs.statFocus);
     }
 
-    const missing = missingSetupChoices({ genre: game.genre, pc: game.pc });
+    const missing = missingSetupChoices({
+      genre: game.genre,
+      pc: game.pc,
+      startingLocation: game.location,
+    });
     game.setupComplete = missing.length === 0;
     game.phase = game.setupComplete ? "exploration" : "setup";
-
-    if (game.setupComplete && !game.location) {
-      game.location = "Unknown location";
-    }
 
     persistGame(game);
 
     const message = game.setupComplete
       ? `Game ready. ${game.pc.name} enters the story.`
       : `Setup needs ${missing.join(", ")}.`;
+    const movedToNewLocation =
+      game.setupComplete &&
+      String(game.location ?? "").trim() !== previousLocation;
+    const startedAdventure = !previousSetupComplete && game.setupComplete;
+    const imageRequest =
+      startedAdventure || movedToNewLocation
+        ? buildLocationImageRequest(
+            game,
+            startedAdventure ? "game_start" : "location_change"
+          )
+        : null;
 
-    return replyWithState(game, message);
+    return replyWithState(game, message, { imageRequest });
   };
 
   server.registerTool(
@@ -2144,6 +2238,7 @@ export function registerRpgTools(server) {
       if (!game) {
         return replyWithError("Game not found. Start a new game first.");
       }
+      const previousLocation = String(game.location ?? "").trim();
 
       if (args?.pc) {
         game.pc = { ...game.pc, ...args.pc };
@@ -2220,7 +2315,14 @@ export function registerRpgTools(server) {
       }
 
       persistGame(game);
-      return replyWithState(game, "Game state updated.");
+      const movedToNewLocation =
+        args?.location !== undefined &&
+        game.setupComplete &&
+        String(game.location ?? "").trim() !== previousLocation;
+      const imageRequest = movedToNewLocation
+        ? buildLocationImageRequest(game, "location_change")
+        : null;
+      return replyWithState(game, "Game state updated.", { imageRequest });
     }
   );
 

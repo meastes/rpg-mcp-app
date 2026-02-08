@@ -7,7 +7,7 @@
     "web"
   ],
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.2",

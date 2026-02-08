@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -14,6 +14,12 @@ import {
 } from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Backpack,
   BarChart3,
   Heart,
@@ -24,6 +30,8 @@ import {
 } from "lucide-react";
 
 const SET_GLOBALS_EVENT = "openai:set_globals";
+const GENERATE_IMAGE_TOOLTIP =
+  "In order to generate the image, remove the app from the chat field. An image cannot be generated while the app is selected in chat. Remember to add the app back after generating the image in order to continue the game.";
 
 type LogEntry = {
   id: string;
@@ -79,6 +87,14 @@ type GameState = {
   mp?: { current: number; max: number };
   inventory?: InventoryItem[];
   location?: string;
+  imageRequest?: {
+    type?: string;
+    gameId?: string;
+    trigger?: string;
+    location?: string;
+    prompt?: string;
+    requestedAt?: string;
+  } | null;
   combat?: CombatState | null;
   lastRoll?: { formula: string; total: number; reason?: string } | null;
   log?: LogEntry[];
@@ -304,6 +320,11 @@ function normalizeEnemySeverity(
 
 export function App() {
   const toolOutput = useToolOutput();
+  const [followUpState, setFollowUpState] = useState<
+    "idle" | "copied" | "failed"
+  >("idle");
+  const [followUpError, setFollowUpError] = useState("");
+  const copiedResetTimerRef = useRef<number | null>(null);
   const game = useMemo(() => {
     if (toolOutput && "type" in toolOutput && toolOutput.type === "ttrpg_state") {
       return toolOutput as GameState;
@@ -316,6 +337,7 @@ export function App() {
   }
 
   const inventory = game.inventory ?? [];
+  const imageRequest = game.imageRequest ?? null;
   const mode: GameMode =
     game.phase === "combat" || Boolean(game.combat) ? "combat" : "explore";
   const characterName = game.pc?.name ?? "Unnamed hero";
@@ -365,6 +387,66 @@ export function App() {
           accent: "secondary",
         };
 
+  useEffect(() => {
+    setFollowUpState("idle");
+    setFollowUpError("");
+    if (copiedResetTimerRef.current) {
+      window.clearTimeout(copiedResetTimerRef.current);
+      copiedResetTimerRef.current = null;
+    }
+  }, [imageRequest?.requestedAt, imageRequest?.prompt]);
+
+  useEffect(
+    () => () => {
+      if (copiedResetTimerRef.current) {
+        window.clearTimeout(copiedResetTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const copyScenePromptToClipboard = async () => {
+    if (!imageRequest?.prompt) return;
+
+    const locationLine = imageRequest.location
+      ? `Location: ${imageRequest.location}`
+      : "Location: Unknown location";
+    const prompt = `Generate an image of the following: ${imageRequest.prompt}`;
+
+    setFollowUpError("");
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(prompt);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = prompt;
+        textArea.setAttribute("readonly", "");
+        textArea.style.position = "absolute";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (!copied) {
+          throw new Error("Browser prevented clipboard copy.");
+        }
+      }
+      setFollowUpState("copied");
+      if (copiedResetTimerRef.current) {
+        window.clearTimeout(copiedResetTimerRef.current);
+      }
+      copiedResetTimerRef.current = window.setTimeout(() => {
+        setFollowUpState("idle");
+        copiedResetTimerRef.current = null;
+      }, 2200);
+    } catch (error) {
+      setFollowUpState("failed");
+      setFollowUpError(
+        error instanceof Error ? error.message : "Unable to copy image prompt."
+      );
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-2xl p-3 sm:p-4">
       <div className="space-y-3">
@@ -378,9 +460,38 @@ export function App() {
                 >
                   {characterName}
                 </h1>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {game.location ? `Location: ${game.location}` : "Character session tracker"}
-                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <p className="text-sm text-muted-foreground">
+                    {game.location
+                      ? `Location: ${game.location}`
+                      : "Character session tracker"}
+                  </p>
+                  {imageRequest?.prompt && (
+                    <TooltipProvider delayDuration={150}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={copyScenePromptToClipboard}
+                            className="inline-flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {followUpState === "copied"
+                              ? "Copied"
+                              : "Copy image prompt"}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs whitespace-normal sm:max-w-sm">
+                          {GENERATE_IMAGE_TOOLTIP}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
+                {followUpState === "failed" && (
+                  <p className="mt-1 text-xs text-destructive">
+                    Copy failed{followUpError ? `: ${followUpError}` : "."}
+                  </p>
+                )}
               </div>
               <div className="flex flex-col items-end gap-3">
                 <Badge variant={statusChip.accent as "secondary" | "outline"} className="rounded-full">
