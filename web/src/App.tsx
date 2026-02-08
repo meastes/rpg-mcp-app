@@ -4,29 +4,35 @@ import {
   Card,
   CardContent,
   CardHeader,
+  CardDescription,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   Backpack,
   BarChart3,
   Heart,
-  Activity,
   ListOrdered,
+  MapPin,
   Sparkles,
   Swords,
+  Wand2,
 } from "lucide-react";
 
 const SET_GLOBALS_EVENT = "openai:set_globals";
@@ -165,126 +171,49 @@ function useToolOutput(): ToolOutput {
   return output;
 }
 
-function Section({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon?: ReactNode;
-  children: ReactNode;
-}) {
-  const headerContent = (
-    <>
-      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <CardTitle className="text-base leading-tight">{title}</CardTitle>
-      </div>
-    </>
-  );
-  return (
-    <Card className="rounded-2xl shadow-sm">
-      <CardHeader className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-foreground">
-            {headerContent}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">{children}</CardContent>
-    </Card>
-  );
-}
-
-function AccordionSection({
-  title,
-  icon,
-  defaultOpen = true,
-  children,
-}: {
-  title: string;
-  icon?: ReactNode;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <Card className="rounded-2xl shadow-sm">
-      <Accordion
-        type="single"
-        collapsible
-        defaultValue={defaultOpen ? "section" : undefined}
-        className="w-full"
-      >
-        <AccordionItem value="section" className="border-none">
-          <CardHeader className="space-y-2">
-            <AccordionTrigger className="py-0 hover:no-underline cursor-pointer">
-              <div className="flex w-full items-center justify-between gap-3 text-left">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-background/60">
-                    {icon}
-                  </div>
-                  <div className="min-w-0">
-                    <CardTitle className="text-base leading-tight">
-                      {title}
-                    </CardTitle>
-                  </div>
-                </div>
-              </div>
-            </AccordionTrigger>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <AccordionContent className="pt-0">
-              {children}
-            </AccordionContent>
-          </CardContent>
-        </AccordionItem>
-      </Accordion>
-    </Card>
-  );
-}
-
-function Meter({
+function ResourceMeter({
   label,
   icon,
   value,
   max,
   tone,
+  note,
 }: {
   label: string;
   icon: ReactNode;
   value: number;
   max: number;
   tone: "hp" | "mp";
+  note: string;
 }) {
   const safeMax = Math.max(0, max);
   const safeValue = clamp(value, 0, safeMax);
   const pct = safeMax > 0 ? Math.round((safeValue / safeMax) * 100) : 0;
   const indicatorStyle =
     tone === "hp"
-      ? { backgroundColor: "var(--destructive)" }
-      : { backgroundColor: "var(--primary)" };
+      ? { backgroundColor: "color-mix(in oklab, var(--destructive) 80%, white 20%)" }
+      : { backgroundColor: "color-mix(in oklab, var(--primary) 78%, white 22%)" };
 
   return (
-    <div className="space-y-2">
+    <div className="rounded-lg border bg-card/60 p-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/60">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-background/70">
             {icon}
           </span>
-          <span className="truncate">{label}</span>
+          <p className="text-sm font-medium">{label}</p>
         </div>
-        <div className="text-sm tabular-nums">
+        <div className="text-right text-sm tabular-nums">
           <span className="font-semibold">{safeValue}</span>
           <span className="text-muted-foreground">/{safeMax}</span>
         </div>
       </div>
       <Progress
         value={pct}
-        className="h-2 rounded-full"
+        className="mt-2 h-1.5 rounded-full bg-secondary/70"
         indicatorStyle={indicatorStyle}
       />
+      <p className="mt-2 text-xs text-muted-foreground">{note}</p>
     </div>
   );
 }
@@ -292,6 +221,11 @@ function Meter({
 function formatStatValue(value?: number) {
   if (value === undefined || value === null || Number.isNaN(value)) return "--";
   return value;
+}
+
+function formatStatModifier(value?: number) {
+  if (value === undefined || value === null || Number.isNaN(value)) return "--";
+  return value >= 0 ? `+${value}` : `${value}`;
 }
 
 function getSeverityFromPercent(percent: number): EnemySeverity {
@@ -331,19 +265,38 @@ export function App() {
     }
     return null;
   }, [toolOutput]);
+  const imageRequest = game?.imageRequest ?? null;
+
+  useEffect(() => {
+    setFollowUpState("idle");
+    setFollowUpError("");
+    if (copiedResetTimerRef.current) {
+      window.clearTimeout(copiedResetTimerRef.current);
+      copiedResetTimerRef.current = null;
+    }
+  }, [imageRequest?.requestedAt, imageRequest?.prompt]);
+
+  useEffect(
+    () => () => {
+      if (copiedResetTimerRef.current) {
+        window.clearTimeout(copiedResetTimerRef.current);
+      }
+    },
+    []
+  );
 
   if (!game) {
     return null;
   }
 
   const inventory = game.inventory ?? [];
-  const imageRequest = game.imageRequest ?? null;
   const mode: GameMode =
     game.phase === "combat" || Boolean(game.combat) ? "combat" : "explore";
   const characterName = game.pc?.name ?? "Unnamed hero";
 
   const hpMax = game.hp?.max ?? 0;
   const hp = game.hp?.current ?? 0;
+  const hpPercent = hpMax > 0 ? Math.round((clamp(hp, 0, hpMax) / hpMax) * 100) : 0;
   const mpMax = game.mp?.max ?? 0;
   const mp = game.mp?.current ?? 0;
 
@@ -387,30 +340,9 @@ export function App() {
           accent: "secondary",
         };
 
-  useEffect(() => {
-    setFollowUpState("idle");
-    setFollowUpError("");
-    if (copiedResetTimerRef.current) {
-      window.clearTimeout(copiedResetTimerRef.current);
-      copiedResetTimerRef.current = null;
-    }
-  }, [imageRequest?.requestedAt, imageRequest?.prompt]);
-
-  useEffect(
-    () => () => {
-      if (copiedResetTimerRef.current) {
-        window.clearTimeout(copiedResetTimerRef.current);
-      }
-    },
-    []
-  );
-
   const copyScenePromptToClipboard = async () => {
     if (!imageRequest?.prompt) return;
 
-    const locationLine = imageRequest.location
-      ? `Location: ${imageRequest.location}`
-      : "Location: Unknown location";
     const prompt = `Generate an image of the following: ${imageRequest.prompt}`;
 
     setFollowUpError("");
@@ -448,198 +380,246 @@ export function App() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-2xl p-3 sm:p-4">
-      <div className="space-y-3">
-        <Card className="rounded-2xl shadow-sm">
-          <CardContent className="pt-6">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h1
-                  className="font-semibold leading-tight tracking-tight truncate"
-                  style={{ fontSize: "clamp(1.5rem, 3.2vw, 2.25rem)" }}
-                >
-                  {characterName}
-                </h1>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <p className="text-sm text-muted-foreground">
-                    {game.location
-                      ? `Location: ${game.location}`
-                      : "Character session tracker"}
-                  </p>
-                  {imageRequest?.prompt && (
-                    <TooltipProvider delayDuration={150}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={copyScenePromptToClipboard}
-                            className="inline-flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {followUpState === "copied"
-                              ? "Copied"
-                              : "Copy image prompt"}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs whitespace-normal sm:max-w-sm">
-                          {GENERATE_IMAGE_TOOLTIP}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                </div>
-                {followUpState === "failed" && (
-                  <p className="mt-1 text-xs text-destructive">
-                    Copy failed{followUpError ? `: ${followUpError}` : "."}
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-col items-end gap-3">
-                <Badge variant={statusChip.accent as "secondary" | "outline"} className="rounded-full">
-                  <span className="inline-flex items-center gap-1.5">
-                    {statusChip.icon}
-                    {statusChip.label}
-                  </span>
-                </Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    <div className="relative mx-auto w-full max-w-2xl px-3 pb-4 pt-3 sm:px-4 sm:pt-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.17),transparent_66%)]" />
 
-        <Section title="Resources" icon={<Activity className="h-4 w-4" />}>
-          <div className="space-y-4">
-            <Meter
-              label="HP"
-              icon={<Heart className="h-4 w-4" />}
-              value={hp}
-              max={hpMax}
-              tone="hp"
-            />
-            {mpMax > 0 && (
-              <Meter
-                label="MP"
-                icon={<Sparkles className="h-4 w-4" />}
-                value={mp}
-                max={mpMax}
-                tone="mp"
-              />
-            )}
-          </div>
-        </Section>
-
-        <AccordionSection
-          title="Stats"
-          icon={<BarChart3 className="h-4 w-4" />}
-          defaultOpen
-        >
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-1.5">
-            {(Object.keys(stats) as StatKey[]).map((key) => (
-              <div
-                key={key}
-                className="flex items-center justify-between gap-2 rounded-full border px-3 py-1.5 text-sm font-medium"
+      <Card className="overflow-hidden rounded-2xl border-border/75 bg-card/80 shadow-lg backdrop-blur">
+        <CardHeader className="space-y-4 p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle
+                className="truncate text-[clamp(1.35rem,3.1vw,2rem)] leading-tight tracking-tight"
               >
-                <span className="text-muted-foreground">{key}</span>
-                <span className="tabular-nums">{formatStatValue(stats[key])}</span>
-              </div>
-            ))}
+                {characterName}
+              </CardTitle>
+              <CardDescription className="mt-1.5 flex items-center gap-2">
+                <MapPin className="h-4 w-4 shrink-0" />
+                <span className="truncate">
+                  {game.location ? game.location : "Unknown location"}
+                </span>
+              </CardDescription>
+            </div>
+            <Badge
+              variant={statusChip.accent as "secondary" | "outline"}
+              className="rounded-full"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {statusChip.icon}
+                {statusChip.label}
+              </span>
+            </Badge>
           </div>
-        </AccordionSection>
 
-        <AccordionSection
-          title="Inventory"
-          icon={<Backpack className="h-4 w-4" />}
-          defaultOpen={false}
-        >
-          <div className="space-y-2">
-            {inventory.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Inventory is empty.</p>
-            ) : (
-              inventory.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-start justify-between gap-3 rounded-2xl border p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{item.name}</p>
-                    {item.notes && (
-                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                        {item.notes}
-                      </p>
-                    )}
-                  </div>
-                  <Badge variant="secondary" className="rounded-full tabular-nums">
-                    x{item.qty}
-                  </Badge>
-                </div>
-              ))
+          <div className="flex flex-wrap items-center gap-2">
+            {imageRequest?.prompt && (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={copyScenePromptToClipboard}
+                      className="gap-2 border border-border/90"
+                    >
+                      <Wand2 className="h-3.5 w-3.5" />
+                      {followUpState === "copied" ? "Prompt copied" : "Generate location image"}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs whitespace-normal sm:max-w-sm">
+                    {GENERATE_IMAGE_TOOLTIP}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
-        </AccordionSection>
 
-        {mode === "combat" && (
-          <div className="space-y-3">
-            <AccordionSection
-              title="Initiative"
-              icon={<ListOrdered className="h-4 w-4" />}
-              defaultOpen
-            >
-              <div className="space-y-2">
-                {initiative.length === 0 ? (
-                  <div className="rounded-2xl border p-3 text-sm text-muted-foreground">
-                    Initiative order will appear here.
+          {followUpState === "failed" && (
+            <p className="text-xs text-destructive">
+              Copy failed{followUpError ? `: ${followUpError}` : "."}
+            </p>
+          )}
+        </CardHeader>
+
+        <Separator />
+
+        <CardContent className="p-4 sm:p-5">
+          <Tabs defaultValue="resources" className="w-full">
+            <TabsList className="grid h-auto w-full grid-cols-3 gap-1 rounded-lg border border-border/70 bg-background/20 p-1">
+              <TabsTrigger value="resources" className="gap-2">
+                <Heart className="h-4 w-4" />
+                Resources
+              </TabsTrigger>
+              <TabsTrigger value="stats" className="gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Stats
+              </TabsTrigger>
+              <TabsTrigger value="inventory" className="gap-2">
+                <Backpack className="h-4 w-4" />
+                Inventory
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="resources" className="mt-4 space-y-3">
+              <ResourceMeter
+                label="HP"
+                icon={<Heart className="h-4 w-4" />}
+                value={hp}
+                max={hpMax}
+                tone="hp"
+                note={
+                  hpPercent <= 25 ? "Critical: healing recommended." : "Stable condition."
+                }
+              />
+
+              {mpMax > 0 && (
+                <ResourceMeter
+                  label="MP"
+                  icon={<Sparkles className="h-4 w-4" />}
+                  value={mp}
+                  max={mpMax}
+                  tone="mp"
+                  note="Spend carefully before entering major encounters."
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="stats" className="mt-4">
+              <div className="grid grid-cols-3 gap-3">
+              {(Object.keys(stats) as StatKey[]).map((key) => (
+                <div
+                  key={key}
+                  className="rounded-lg border bg-background/10 p-3 text-center"
+                >
+                  <p className="text-xs font-medium text-muted-foreground">{key}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums">
+                    {formatStatValue(stats[key])}
+                  </p>
+                  <p className="text-xs tabular-nums text-muted-foreground">
+                    {formatStatModifier(stats[key])}
+                  </p>
+                </div>
+              ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="inventory" className="mt-4">
+              <ScrollArea className="h-[260px] pr-2">
+                <div className="space-y-2">
+              {inventory.length === 0 ? (
+                <div className="rounded-lg border bg-background/10 px-4 py-6 text-center">
+                  <div className="mx-auto mb-2 grid h-9 w-9 place-items-center rounded-full border bg-secondary/40">
+                    <Backpack className="h-4 w-4 text-muted-foreground" />
                   </div>
-                ) : (
-                  initiative.map((entry, idx) => (
-                    <div
-                      key={entry.id}
-                      className={`flex items-center justify-between gap-3 rounded-2xl border p-3 ${
-                        entry.id === currentTurnId ? "ring-2 ring-inset ring-ring" : ""
-                      }`}
-                    >
-                      <p className="truncate text-sm font-semibold">
-                        {idx + 1}. {entry.name}
-                      </p>
-                      <Badge variant="outline" className="rounded-full tabular-nums">
-                        {entry.initiative}
+                  <p className="font-medium">Inventory is empty</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Add quest items, loot, or supplies to track here.
+                  </p>
+                </div>
+              ) : (
+                inventory.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border bg-background/10 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{item.name}</p>
+                        {item.notes && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {item.notes}
+                          </p>
+                        )}
+                      </div>
+                      <Badge
+                        variant="secondary"
+                        className="rounded-full tabular-nums"
+                      >
+                        x{item.qty}
                       </Badge>
                     </div>
-                  ))
-                )}
-              </div>
-            </AccordionSection>
-
-            <AccordionSection
-              title="Combat tracker"
-              icon={<Swords className="h-4 w-4" />}
-              defaultOpen
-            >
-              <div className="space-y-2">
-                {enemies.length === 0 ? (
-                  <div className="rounded-2xl border p-3 text-sm text-muted-foreground">
-                    No enemies yet.
                   </div>
-                ) : (
-                  enemies.map((enemy) => (
-                    <div key={enemy.id} className="rounded-2xl border p-3">
-                      <p className="text-sm font-semibold">{enemy.name}</p>
-                      <div className="mt-1 flex items-center gap-2">
-                        <Badge
-                          variant={severityTone[enemy.severity].variant}
-                          className="rounded-full"
-                        >
-                          {enemy.severity}
-                        </Badge>
-                      </div>
-                      {enemy.note && (
-                        <p className="mt-1 text-xs text-muted-foreground">{enemy.note}</p>
-                      )}
-                    </div>
-                  ))
-                )}
+                ))
+              )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
+
+          {mode === "combat" && (
+            <div className="mt-5 pt-4">
+              <Separator />
+              <div className="mb-4 mt-5 flex items-center gap-2 text-sm font-semibold tracking-wide">
+                <Swords className="h-4 w-4" />
+                Combat
               </div>
-            </AccordionSection>
-          </div>
-        )}
-      </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border bg-background/10 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                    <ListOrdered className="h-4 w-4 text-muted-foreground" />
+                    Initiative
+                  </div>
+                  <div className="space-y-2">
+                    {initiative.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Initiative order will appear here.
+                      </p>
+                    ) : (
+                      initiative.map((entry, idx) => (
+                        <div
+                          key={entry.id}
+                          className={cn(
+                            "flex items-center justify-between gap-3 rounded-md border px-2.5 py-2",
+                            entry.id === currentTurnId
+                              ? "border-ring/80 bg-secondary/60"
+                              : "border-border/80"
+                          )}
+                        >
+                          <p className="truncate text-sm">
+                            {idx + 1}. {entry.name}
+                          </p>
+                          <span className="text-xs tabular-nums text-muted-foreground">
+                            {entry.initiative}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border bg-background/10 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                    <Swords className="h-4 w-4 text-muted-foreground" />
+                    Enemies
+                  </div>
+                  <div className="space-y-2">
+                    {enemies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No enemies yet.</p>
+                    ) : (
+                      enemies.map((enemy) => (
+                        <div key={enemy.id} className="rounded-md border px-2.5 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-semibold">{enemy.name}</p>
+                            <Badge
+                              variant={severityTone[enemy.severity].variant}
+                              className="rounded-full"
+                            >
+                              {enemy.severity}
+                            </Badge>
+                          </div>
+                          {enemy.note && (
+                            <p className="mt-1 text-xs text-muted-foreground">{enemy.note}</p>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
