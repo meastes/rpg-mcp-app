@@ -24,6 +24,23 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  GENERATE_IMAGE_TOOLTIP,
+  SET_GLOBALS_EVENT,
+  buildEnemies,
+  buildInitiative,
+  buildStats,
+  clamp,
+  formatStatModifier,
+  formatStatValue,
+  getGameMode,
+  severityTone,
+  type GameMode,
+  type GameState,
+  type SetGlobalsEvent,
+  type StatKey,
+  type ToolOutput,
+} from "@/lib/game-state";
 import { cn } from "@/lib/utils";
 import {
   Backpack,
@@ -36,132 +53,9 @@ import {
   Wand2,
 } from "lucide-react";
 
-const SET_GLOBALS_EVENT = "openai:set_globals";
-const GENERATE_IMAGE_TOOLTIP =
-  "In order to generate the image, remove the app from the chat field. An image cannot be generated while the app is selected in chat. Remember to add the app back after generating the image in order to continue the game.";
-
-type LogEntry = {
-  id: string;
-  at: string;
-  kind: string;
-  text: string;
-};
-
-type InventoryItem = {
-  id: string;
-  name: string;
-  qty: number;
-  notes?: string;
-};
-
-type CombatState = {
-  round?: number;
-  currentTurnId?: string | null;
-  enemies?: Array<{
-    id?: string;
-    name: string;
-    hp?: number;
-    hpMax?: number;
-    status?: EnemySeverity | string;
-    intent?: string;
-    note?: string;
-  }>;
-  initiative?: Array<{
-    id?: string;
-    name: string;
-    kind?: "pc" | "enemy";
-    initiative?: number;
-  }>;
-};
-
-type GameState = {
-  type: "ttrpg_state";
-  gameId: string;
-  phase: "setup" | "exploration" | "combat" | string;
-  setupComplete: boolean;
-  genre?: string;
-  tone?: string;
-  storyElements?: string[];
-  pc?: {
-    name?: string;
-    pronouns?: string;
-    archetype?: string;
-    background?: string;
-    goal?: string;
-  };
-  stats?: {
-    str: number;
-    agi: number;
-    con: number;
-    int: number;
-    wis: number;
-    cha: number;
-  };
-  hp?: { current: number; max: number };
-  mp?: { current: number; max: number };
-  inventory?: InventoryItem[];
-  location?: string;
-  imageRequest?: {
-    type?: string;
-    gameId?: string;
-    trigger?: string;
-    location?: string;
-    prompt?: string;
-    requestedAt?: string;
-  } | null;
-  combat?: CombatState | null;
-  lastRoll?: { formula: string; total: number; reason?: string } | null;
-  log?: LogEntry[];
-};
-
-type ToolOutput = GameState | { type: string } | null;
-
-type SetGlobalsEvent = CustomEvent<{ globals: { toolOutput?: ToolOutput } }>;
-
-type EnemySeverity =
-  | "Unhurt"
-  | "Scratched"
-  | "Wounded"
-  | "Badly Wounded"
-  | "Critical"
-  | "Down";
-
-type Enemy = {
-  id: string;
-  name: string;
-  severity: EnemySeverity;
-  note?: string;
-};
-
-type InitiativeEntry = {
-  id: string;
-  name: string;
-  kind: "pc" | "enemy";
-  initiative: number;
-};
-
-type GameMode = "explore" | "combat";
-
-type StatKey = "STR" | "DEX" | "CON" | "INT" | "WIS" | "CHA";
-
-const clamp = (n: number, min: number, max: number) =>
-  Math.max(min, Math.min(max, n));
-
-const severityTone: Record<
-  EnemySeverity,
-  { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
-> = {
-  Unhurt: { label: "Unhurt", variant: "outline" },
-  Scratched: { label: "Scratched", variant: "secondary" },
-  Wounded: { label: "Wounded", variant: "default" },
-  "Badly Wounded": { label: "Badly", variant: "default" },
-  Critical: { label: "Critical", variant: "destructive" },
-  Down: { label: "Down", variant: "destructive" },
-};
-
 function useToolOutput(): ToolOutput {
   const [output, setOutput] = useState<ToolOutput>(
-    () => window.openai?.toolOutput ?? null
+    () => (window.openai?.toolOutput as ToolOutput) ?? null
   );
 
   useEffect(() => {
@@ -282,40 +176,6 @@ function LoadingPanel() {
   );
 }
 
-function formatStatValue(value?: number) {
-  if (value === undefined || value === null || Number.isNaN(value)) return "--";
-  return value;
-}
-
-function formatStatModifier(value?: number) {
-  if (value === undefined || value === null || Number.isNaN(value)) return "--";
-  return value >= 0 ? `+${value}` : `${value}`;
-}
-
-function getSeverityFromPercent(percent: number): EnemySeverity {
-  if (percent <= 0) return "Down";
-  if (percent <= 15) return "Critical";
-  if (percent <= 35) return "Badly Wounded";
-  if (percent <= 60) return "Wounded";
-  if (percent <= 85) return "Scratched";
-  return "Unhurt";
-}
-
-function normalizeEnemySeverity(
-  status?: string,
-  hp?: number,
-  hpMax?: number
-): EnemySeverity {
-  if (status && status in severityTone) {
-    return status as EnemySeverity;
-  }
-  const safeMax = Number.isFinite(hpMax) && hpMax ? hpMax : 0;
-  const safeHp = Number.isFinite(hp) ? hp : 0;
-  if (!safeMax) return "Unhurt";
-  const percent = Math.round((safeHp / safeMax) * 100);
-  return getSeverityFromPercent(percent);
-}
-
 export function App() {
   const toolOutput = useToolOutput();
   const [followUpState, setFollowUpState] = useState<
@@ -358,8 +218,7 @@ export function App() {
   }
 
   const inventory = game.inventory ?? [];
-  const mode: GameMode =
-    game.phase === "combat" || Boolean(game.combat) ? "combat" : "explore";
+  const mode: GameMode = getGameMode(game);
   const characterName = game.pc?.name ?? "Unnamed hero";
 
   const hpMax = game.hp?.max ?? 0;
@@ -368,33 +227,9 @@ export function App() {
   const mpMax = game.mp?.max ?? 0;
   const mp = game.mp?.current ?? 0;
 
-  const stats: Record<StatKey, number | undefined> = {
-    STR: game.stats?.str,
-    DEX: game.stats?.agi,
-    CON: game.stats?.con,
-    INT: game.stats?.int,
-    WIS: game.stats?.wis,
-    CHA: game.stats?.cha,
-  };
-
-  const enemies: Enemy[] = (game.combat?.enemies ?? [])
-    .filter((enemy) => enemy?.name)
-    .map((enemy) => ({
-      id: enemy.id ?? `enemy_${enemy.name}`,
-      name: enemy.name,
-      severity: normalizeEnemySeverity(enemy.status, enemy.hp, enemy.hpMax),
-      note: enemy.note ?? enemy.intent ?? "",
-    }));
-
-  const initiative: InitiativeEntry[] = (game.combat?.initiative ?? [])
-    .filter((entry) => entry?.name)
-    .map((entry) => ({
-      id: entry.id ?? `init_${entry.name}`,
-      name: entry.name,
-      kind: entry.kind === "enemy" ? "enemy" : "pc",
-      initiative: Number(entry.initiative ?? 0),
-    }))
-    .sort((a, b) => b.initiative - a.initiative);
+  const stats: Record<StatKey, number | undefined> = buildStats(game);
+  const enemies = buildEnemies(game);
+  const initiative = buildInitiative(game);
 
   const currentTurnId =
     game.combat?.currentTurnId ?? (initiative[0]?.id ?? null);

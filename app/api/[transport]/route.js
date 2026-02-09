@@ -1,13 +1,6 @@
-import { createMcpHandler } from "mcp-handler";
-import { registerRpgTools } from "../../../server/mcp.js";
+import { createRpgMcpHandler } from "../../create-rpg-mcp-handler.js";
 
-const handler = createMcpHandler(
-  (server) => {
-    registerRpgTools(server);
-  },
-  { name: "ttrpg-mcp", version: "0.1.0" },
-  { basePath: "/api" }
-);
+const handler = createRpgMcpHandler("/api");
 
 export const runtime = "nodejs";
 

@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useEffect } from "react";
 import { App } from "../App";
+import type { GameState, ToolOutput } from "../lib/game-state";
 
-const mockState = {
+const mockState: GameState = {
   type: "ttrpg_state",
   gameId: "game_demo",
   phase: "exploration",
@@ -33,22 +34,8 @@ const mockState = {
   ],
 };
 
-type MockState = typeof mockState;
-type MockImageRequest = {
-  type?: string;
-  gameId?: string;
-  trigger?: string;
-  location?: string;
-  prompt?: string;
-  requestedAt?: string;
-} | null;
-
-type StoryState = MockState & {
-  imageRequest?: MockImageRequest;
-};
-
 type WrapperProps = {
-  state: StoryState | null;
+  state: ToolOutput;
 };
 
 function StateWrapper({ state }: WrapperProps) {
