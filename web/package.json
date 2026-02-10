@@ -8,6 +8,7 @@
     "build:js": "esbuild ./src/main.tsx --bundle --format=esm --tsconfig=./tsconfig.json --alias:@=./src --outfile=./dist/widget.js",
     "build:widget": "node ./scripts/build-widget.mjs",
     "build": "npm run build:css && npm run build:js && npm run build:widget",
+    "test": "node ./scripts/run-tests.mjs",
     "storybook": "npm run build:css && storybook dev -p 6006",
     "storybook:build": "npm run build:css && storybook build"
   },
